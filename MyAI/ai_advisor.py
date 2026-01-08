@@ -1,7 +1,7 @@
 from google import genai
 
 # 1. あなたのAPIキーをここに入れてください
-API_KEY = "AIzaSyDwyMsY2bs6R_pTQlsBdEBNWugJiVXkWng"
+API_KEY = "dummy"
 
 def main():
     try:
