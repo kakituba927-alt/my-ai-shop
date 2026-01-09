@@ -2,6 +2,7 @@ import streamlit as st
 import datetime
 import os
 import subprocess
+import sys
 
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]  # secrets.toml or Streamlit Cloud secretsに必ず設定
@@ -108,7 +109,7 @@ elif menu == "集計表示":
         with st.spinner("グラフを作成中..."):
             try:
                 result = subprocess.run(
-                    ["python", GRAPH_FILE],
+                    [sys.executable, GRAPH_FILE],
                     capture_output=True, text=True
                 )
                 if result.returncode != 0:
