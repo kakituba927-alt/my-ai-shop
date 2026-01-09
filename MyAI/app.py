@@ -6,9 +6,11 @@ import subprocess
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]  # secrets.toml or Streamlit Cloud secretsに必ず設定
 
-URIAGE_FILE = "uriage.txt"
-CHART_FILE = "sales_chart.png"
-MASTER_FILE = "master_data.txt"
+# ====== ここで全てのファイルパス先頭に "MyAI/" を追加 ======
+BASE_DIR = "MyAI/"
+URIAGE_FILE = os.path.join(BASE_DIR, "uriage.txt")
+CHART_FILE = os.path.join(BASE_DIR, "sales_chart.png")
+MASTER_FILE = os.path.join(BASE_DIR, "master_data.txt")
 
 # 商品マスター情報の読み書き用関数
 def load_master_data():
@@ -97,7 +99,7 @@ elif menu == "集計表示":
             try:
                 # graph.py（グラフ作成スクリプト）を実行
                 result = subprocess.run(
-                    ["python", "graph.py"],
+                    ["python", os.path.join(BASE_DIR, "graph.py")],
                     capture_output=True, text=True
                 )
                 if result.returncode != 0:
@@ -211,4 +213,28 @@ elif menu == "商品設定":
 
 # --- graph.py 側のフォント設定例（matplotlib使用時。MS Gothicなど安全なフォント指定を追記してください）---
 # （graph.pyの冒頭に下記を必ず追加・修正してください。）
-
+# 
+# ---- graph.py の安全な日本語フォント設定サンプル ------
+#
+# import matplotlib
+# # 日本語表示（Japanize-matplotlibがあれば必ず使う、なければ安全な代替をセット）
+# try:
+#     import japanize_matplotlib
+# except ImportError:
+#     # Japanize-matplotlibがなければMS GothicやIPAexGothic等をfallback
+#     import matplotlib.font_manager as fm
+#     # Linux環境向け: IPAexGothic, Noto Sans CJK, Axis, MS Gothicなど、環境によって選ぶ
+#     font_candidates = [
+#         "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf",
+#         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+#         "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+#         "/usr/share/fonts/truetype/msttcorefonts/MSGOTHIC.TTC",
+#         "MS Gothic", "IPAexGothic", "Noto Sans CJK JP"
+#     ]
+#     for fc in font_candidates:
+#         try:
+#             matplotlib.rc("font", family=fm.FontProperties(fname=fc).get_name())
+#             break
+#         except Exception:
+#             continue
+# ---- 必ずこのような安全策をグラフ冒頭で実施してください ----
