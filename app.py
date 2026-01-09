@@ -6,31 +6,40 @@ import subprocess
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]  # secrets.toml or Streamlit Cloud secretsに必ず設定
 
-# ====== ここで全てのファイルパス先頭に "MyAI/" を追加 ======
-BASE_DIR = "MyAI/"
-URIAGE_FILE = os.path.join(BASE_DIR, "uriage.txt")
-CHART_FILE = os.path.join(BASE_DIR, "sales_chart.png")
-MASTER_FILE = os.path.join(BASE_DIR, "master_data.txt")
+# ====== ファイル名を"MyAI/"無しに統一 ======
+URIAGE_FILE = "uriage.txt"
+CHART_FILE = "sales_chart.png"
+MASTER_FILE = "master_data.txt"
+GRAPH_FILE = "graph.py"
+
+def ensure_file_exists(path):
+    """指定のファイルが存在しなければ空ファイルを作成する。"""
+    # グラフ等の画像/pyファイルは確認しない
+    if path in [CHART_FILE, GRAPH_FILE]:
+        return
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8"):
+            pass
 
 # 商品マスター情報の読み書き用関数
 def load_master_data():
     """master_data.txtから商品名・金額・原価の辞書を返す"""
+    ensure_file_exists(MASTER_FILE)
     master = {}
-    if os.path.exists(MASTER_FILE):
-        with open(MASTER_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line: continue
-                parts = [p.strip() for p in line.split(",")]
-                if len(parts) >= 3:
-                    name, price, cost = parts[0], parts[1], parts[2]
-                    try:
-                        master[name] = {
-                            "price": int(price),
-                            "cost": int(cost)
-                        }
-                    except ValueError:
-                        continue
+    with open(MASTER_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 3:
+                name, price, cost = parts[0], parts[1], parts[2]
+                try:
+                    master[name] = {
+                        "price": int(price),
+                        "cost": int(cost)
+                    }
+                except ValueError:
+                    continue
     return master
 
 def save_master_data(master):
@@ -40,6 +49,7 @@ def save_master_data(master):
             f.write(f"{name}, {info['price']}, {info['cost']}\n")
 
 def append_sales(product_name, price, cost):
+    ensure_file_exists(URIAGE_FILE)
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     profit = price - cost
     with open(URIAGE_FILE, "a", encoding="utf-8") as f:
@@ -47,16 +57,16 @@ def append_sales(product_name, price, cost):
         f.write(f"{now}, {product_name}, {price}, {profit}\n")
 
 def calc_total_sales():
+    ensure_file_exists(URIAGE_FILE)
     total = 0
-    if os.path.exists(URIAGE_FILE):
-        with open(URIAGE_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = [p.strip() for p in line.strip().split(",")]
-                if len(parts) >= 3:
-                    try:
-                        total += int(parts[2])
-                    except ValueError:
-                        continue
+    with open(URIAGE_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = [p.strip() for p in line.strip().split(",")]
+            if len(parts) >= 3:
+                try:
+                    total += int(parts[2])
+                except ValueError:
+                    continue
     return total
 
 # サイドバーのメニュー（『商品設定』を追加）
@@ -97,9 +107,8 @@ elif menu == "集計表示":
     if st.button("最新のグラフで集計を見る"):
         with st.spinner("グラフを作成中..."):
             try:
-                # graph.py（グラフ作成スクリプト）を実行
                 result = subprocess.run(
-                    ["python", os.path.join(BASE_DIR, "graph.py")],
+                    ["python", GRAPH_FILE],
                     capture_output=True, text=True
                 )
                 if result.returncode != 0:
@@ -125,50 +134,46 @@ elif menu == "AI相談":
     elif st.button("AIに売上を分析してもらう！"):
         with st.spinner("AIが売上データを分析中..."):
             try:
-                # secretsが空文字や未設定の場合の対応
                 if not GOOGLE_API_KEY or GOOGLE_API_KEY.strip() == "":
                     st.error("Google APIキーが設定されていません。")
                 else:
                     from google import genai
 
-                    # 売上データの読み込み
-                    if not os.path.exists(URIAGE_FILE):
-                        st.error("売上データuriage.txtがありません。")
-                    else:
-                        with open(URIAGE_FILE, "r", encoding="utf-8") as f:
-                            uriage_content = f.read()
+                    ensure_file_exists(URIAGE_FILE)
+                    with open(URIAGE_FILE, "r", encoding="utf-8") as f:
+                        uriage_content = f.read()
 
-                        prompt = (
-                            "あなたは10年の経験を持つ敏腕経営コンサルタントです。\n"
-                            "以下の売上履歴(uriage.txt)と、それをもとに作成された売上グラフ（sales_chart.png）があると仮定します。\n"
-                            "\n"
-                            "【アドバイス指示】\n"
-                            "1. 以下の売上履歴は1行ごとに「日時, 商品名, 売上金額, 利益」というフォーマットで記録されています。\n"
-                            "2. あなたはこのデータから、単なる売上合計だけでなく、以下を必ず計算し解説してください：\n"
-                            "   - 「全体の売上合計」\n"
-                            "   - 「全体のトータル利益（利益合計）」\n"
-                            "   - 「全体の利益率（トータル利益÷売上合計）」\n"
-                            "   - 商品別に売上・利益・利益率をまとめ、それぞれ商品ごとに比較・解説してください。\n"
-                            "3. 特に「どの商品が効率よく儲かっているか（利益額・利益率が高いか）」を明確に指摘してください。\n"
-                            "4. 利益を最大化するための戦略や提案（例：どの商品を重点的に売ると良いか、セット販売や価格調整のアイデアなど）を複数案、具体的に提案してください。\n"
-                            "5. 明日の売上や利益の予測も、なるべく数値を使って論理的に述べてください。\n"
-                            "6. 明日のチャレンジに向けて店長が前向きになれる一言メッセージも最後に添えてください。\n"
-                            "\n"
-                            "【制約と補足】\n"
-                            "- 分析や提案ではsales_chart.png（商品別売上棒グラフ）も参照した体裁ですが、数値や予測の根拠は必ずuriage.txtの履歴のみを使ってください。\n"
-                            "- 提案は現実的かつ短期的にも実行しやすいものを必ず含めてください。\n"
-                            "\n"
-                            "売上履歴(uriage.txt)：\n"
-                            f"{uriage_content}"
-                        )
+                    prompt = (
+                        "あなたは10年の経験を持つ敏腕経営コンサルタントです。\n"
+                        "以下の売上履歴(uriage.txt)と、それをもとに作成された売上グラフ（sales_chart.png）があると仮定します。\n"
+                        "\n"
+                        "【アドバイス指示】\n"
+                        "1. 以下の売上履歴は1行ごとに「日時, 商品名, 売上金額, 利益」というフォーマットで記録されています。\n"
+                        "2. あなたはこのデータから、単なる売上合計だけでなく、以下を必ず計算し解説してください：\n"
+                        "   - 「全体の売上合計」\n"
+                        "   - 「全体のトータル利益（利益合計）」\n"
+                        "   - 「全体の利益率（トータル利益÷売上合計）」\n"
+                        "   - 商品別に売上・利益・利益率をまとめ、それぞれ商品ごとに比較・解説してください。\n"
+                        "3. 特に「どの商品が効率よく儲かっているか（利益額・利益率が高いか）」を明確に指摘してください。\n"
+                        "4. 利益を最大化するための戦略や提案（例：どの商品を重点的に売ると良いか、セット販売や価格調整のアイデアなど）を複数案、具体的に提案してください。\n"
+                        "5. 明日の売上や利益の予測も、なるべく数値を使って論理的に述べてください。\n"
+                        "6. 明日のチャレンジに向けて店長が前向きになれる一言メッセージも最後に添えてください。\n"
+                        "\n"
+                        "【制約と補足】\n"
+                        "- 分析や提案ではsales_chart.png（商品別売上棒グラフ）も参照した体裁ですが、数値や予測の根拠は必ずuriage.txtの履歴のみを使ってください。\n"
+                        "- 提案は現実的かつ短期的にも実行しやすいものを必ず含めてください。\n"
+                        "\n"
+                        "売上履歴(uriage.txt)：\n"
+                        f"{uriage_content}"
+                    )
 
-                        client = genai.Client(api_key=GOOGLE_API_KEY.strip())
-                        response = client.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents=prompt
-                        )
-                        st.markdown("#### --- AIアドバイザーからの回答 ---")
-                        st.write(response.text)
+                    client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt
+                    )
+                    st.markdown("#### --- AIアドバイザーからの回答 ---")
+                    st.write(response.text)
             except Exception as e:
                 st.error(f"エラーが発生しました: {e}")
 
