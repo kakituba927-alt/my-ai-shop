@@ -211,19 +211,4 @@ elif menu == "商品設定":
 
 # --- graph.py 側のフォント設定例（matplotlib使用時。MS Gothicなど安全なフォント指定を追記してください）---
 # （graph.pyの冒頭に下記を必ず追加・修正してください。）
-"""
-import matplotlib
-# Windows環境やStreamlit Cloudでは 'MS Gothic' が無い場合 'IPAexGothic' など fallback
-# ここでは 'MS Gothic' があれば優先、なければ IPAexGothic や DejaVu Sans を fallback
-import matplotlib.pyplot as plt
 
-font_candidates = ["MS Gothic", "IPAexGothic", "Yu Gothic", "Meiryo", "TakaoGothic", "Noto Sans CJK JP", "DejaVu Sans"]
-for f in font_candidates:
-    try:
-        matplotlib.rc("font", family=f)
-        # テスト用: plt.figure().text(0.1, 0.5, 'テスト', fontsize=12)
-        break
-    except Exception:
-        continue
-matplotlib.rcParams['axes.unicode_minus'] = False
-"""
