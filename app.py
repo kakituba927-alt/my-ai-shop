@@ -81,12 +81,80 @@ def load_sales_df():
         st.error(f"売上データの読込時にエラーが発生しました: {e}")
         return pd.DataFrame(columns=["日時", "商品名", "売上金額", "利益"])
 
-# サイドバーのメニュー（『商品設定』を追加＋"一括表示"に置換）
+# -------- フィルター状態（商品・日付範囲）はサイドバーで管理して全体で共通 --------
+
+# 共通のSalesデータ
+df = load_sales_df()
+if not df.empty:
+    df["日時_dt"] = pd.to_datetime(df["日時"], errors="coerce")
+    unique_products = sorted(df["商品名"].dropna().unique())
+    min_date = df["日時_dt"].min()
+    max_date = df["日時_dt"].max()
+    default_start = min_date.date() if pd.notnull(min_date) else datetime.date.today()
+    default_end = max_date.date() if pd.notnull(max_date) else datetime.date.today()
+else:
+    unique_products = []
+    default_start = datetime.date.today()
+    default_end = datetime.date.today()
+
+# ---- サイドバーのメニュー＆フィルター ----
 st.sidebar.title("ショップ管理メニュー")
 menu = st.sidebar.radio(
     "メニューを選択してください",
-    ("売上入力", "一括表示", "AI相談", "商品設定")
+    ("売上入力", "一括表示", "AI相談", "商品設定"),
+    key="main_menu"
 )
+
+# フィルター: 商品と日付範囲
+with st.sidebar:
+    st.markdown("### ▼ 売上一覧・AI分析用フィルター")
+    filter_disable = len(unique_products) == 0
+    selected_products = st.multiselect(
+        "商品名で絞り込み",
+        options=unique_products,
+        default=unique_products,
+        key="global_products",
+        disabled=filter_disable
+    )
+    start_date = st.date_input(
+        "開始日",
+        value=default_start,
+        min_value=default_start,
+        max_value=default_end,
+        key="global_start_date",
+        disabled=filter_disable
+    )
+    end_date = st.date_input(
+        "終了日",
+        value=default_end,
+        min_value=default_start,
+        max_value=default_end,
+        key="global_end_date",
+        disabled=filter_disable
+    )
+
+# --- グローバルフィルター適用（売上一覧・AI相談） ---
+def get_filtered_sales(df):
+    if df.empty:
+        return df
+    # 商品名で絞り込み
+    filtered = df.copy()
+    if selected_products:
+        filtered = filtered[filtered["商品名"].isin(selected_products)]
+    else:
+        # 何も選択されてなければ空
+        filtered = filtered.iloc[0:0]
+    # 日付範囲
+    try:
+        start_dt = pd.to_datetime(start_date)
+        end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        filtered = filtered[
+            (filtered["日時_dt"] >= start_dt) &
+            (filtered["日時_dt"] <= end_dt)
+        ]
+    except Exception:
+        filtered = filtered.iloc[0:0]
+    return filtered
 
 # 1. 売上入力画面
 if menu == "売上入力":
@@ -113,64 +181,15 @@ if menu == "売上入力":
 elif menu == "一括表示":
     st.header("売上一覧・集計＆統計分析 (Pandas利用)")
 
-    df = load_sales_df()
-
     if df.empty:
         st.warning("まだ売上データがありません。")
     else:
-        # --- メイン画面上部に横並びでフィルター配置 ---
-        # 商品名一覧（ユニーク）
-        df["日時_dt"] = pd.to_datetime(df["日時"], errors="coerce")
-        unique_products = sorted(df["商品名"].dropna().unique())
-        min_date = df["日時_dt"].min()
-        max_date = df["日時_dt"].max()
-        # デフォルト期間:全期間
-        default_start = min_date.date() if pd.notnull(min_date) else datetime.date.today()
-        default_end = max_date.date() if pd.notnull(max_date) else datetime.date.today()
-
-        filter_cols = st.columns([2,1,1])
-        selected_products = filter_cols[0].multiselect(
-            "商品名で絞り込み",
-            options=unique_products,
-            default=unique_products,
-            key="main_filter_products"
-        )
-        start_date = filter_cols[1].date_input(
-            "開始日",
-            value=default_start,
-            min_value=default_start,
-            max_value=default_end,
-            key="main_filter_start_date"
-        )
-        end_date = filter_cols[2].date_input(
-            "終了日",
-            value=default_end,
-            min_value=default_start,
-            max_value=default_end,
-            key="main_filter_end_date"
-        )
-
-        # --- フィルタ適用 ---
-        filtered_df = df.copy()
-
-        # 商品名でフィルタ
-        if selected_products:
-            filtered_df = filtered_df[filtered_df["商品名"].isin(selected_products)]
-        else:
-            filtered_df = filtered_df.iloc[0:0]  # 何も表示しない
-
-        # 日付範囲でフィルタ
-        start_datetime = pd.to_datetime(start_date)
-        # 終了日はその日23:59:59まで含める
-        end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        filtered_df = filtered_df[
-            (filtered_df["日時_dt"] >= start_datetime) &
-            (filtered_df["日時_dt"] <= end_datetime)
-        ]
-
+        filtered_df = get_filtered_sales(df)
         # 表示用に整形
         styled_df = filtered_df.copy()
         styled_df = styled_df.sort_values("日時", ascending=True)
+
+        # メイン画面にはフィルター表示せずフィルターはサイドバーに移動
 
         st.subheader("■ 売上履歴データ (最新順) ※絞り込み反映")
         st.dataframe(styled_df[::-1][["日時", "商品名", "売上金額", "利益"]], hide_index=True, use_container_width=True)
@@ -178,12 +197,12 @@ elif menu == "一括表示":
         # --- フィルタ後の統計 ---
         st.markdown("### ▼ 統計情報まとめ (絞り込み条件反映)")
 
-        total_sales = int(filtered_df["売上金額"].sum())
+        total_sales = int(filtered_df["売上金額"].sum()) if not filtered_df.empty else 0
         max_sales = int(filtered_df["売上金額"].max()) if len(filtered_df) > 0 else 0
         avg_sales = float(filtered_df["売上金額"].mean()) if not filtered_df["売上金額"].empty else 0
-        total_profit = int(filtered_df["利益"].sum())
+        total_profit = int(filtered_df["利益"].sum()) if not filtered_df.empty else 0
         avg_profit = float(filtered_df["利益"].mean()) if not filtered_df["利益"].empty else 0
-        order_count = len(filtered_df)
+        order_count = len(filtered_df) if not filtered_df.empty else 0
         avg_unit_price = avg_sales  # 1明細＝1客なら平均客単価≒平均売上金額
 
         stats_cols = st.columns(3)
@@ -265,53 +284,70 @@ elif menu == "一括表示":
 elif menu == "AI相談":
     st.header("AIコンサルのアドバイス")
     product_info = load_master_data()
-    if not product_info:
-        st.warning("『商品設定』からまず商品を登録してください。")
-    elif st.button("AIに売上を分析してもらう！"):
-        with st.spinner("AIが売上データを分析中..."):
-            try:
-                if not GOOGLE_API_KEY or GOOGLE_API_KEY.strip() == "":
-                    st.error("Google APIキーが設定されていません。")
-                else:
-                    from google import genai
+    if df.empty:
+        st.info("売上データがありません。")
+    else:
+        filtered_df = get_filtered_sales(df)
+        view_df = filtered_df[["日時", "商品名", "売上金額", "利益"]].copy()
+        view_df = view_df.sort_values("日時", ascending=True)
+        st.dataframe(view_df[::-1], hide_index=True, use_container_width=True)
+        st.markdown("※ 上記リストは、サイドバーで指定された絞り込みデータです。この内容のみをAIで分析します。")
 
-                    ensure_file_exists(URIAGE_FILE)
-                    with open(URIAGE_FILE, "r", encoding="utf-8") as f:
-                        uriage_content = f.read()
+        # ---- AI相談ボタン ----
+        if not product_info:
+            st.warning("『商品設定』からまず商品を登録してください。")
+        elif st.button("AIに売上を分析してもらう！"):
+            if view_df.empty:
+                st.warning("該当の絞り込みデータがありません。")
+            else:
+                with st.spinner("AIが売上データを分析中..."):
+                    try:
+                        if not GOOGLE_API_KEY or GOOGLE_API_KEY.strip() == "":
+                            st.error("Google APIキーが設定されていません。")
+                        else:
+                            from google import genai
 
-                    prompt = (
-                        "あなたは10年の経験を持つ敏腕経営コンサルタントです。\n"
-                        "以下の売上履歴(uriage.txt)と、それをもとに作成された売上グラフ（sales_chart.png）があると仮定します。\n"
-                        "\n"
-                        "【アドバイス指示】\n"
-                        "1. 以下の売上履歴は1行ごとに「日時, 商品名, 売上金額, 利益」というフォーマットで記録されています。\n"
-                        "2. あなたはこのデータから、単なる売上合計だけでなく、以下を必ず計算し解説してください：\n"
-                        "   - 「全体の売上合計」\n"
-                        "   - 「全体のトータル利益（利益合計）」\n"
-                        "   - 「全体の利益率（トータル利益÷売上合計）」\n"
-                        "   - 商品別に売上・利益・利益率をまとめ、それぞれ商品ごとに比較・解説してください。\n"
-                        "3. 特に「どの商品が効率よく儲かっているか（利益額・利益率が高いか）」を明確に指摘してください。\n"
-                        "4. 利益を最大化するための戦略や提案（例：どの商品を重点的に売ると良いか、セット販売や価格調整のアイデアなど）を複数案、具体的に提案してください。\n"
-                        "5. 明日の売上や利益の予測も、なるべく数値を使って論理的に述べてください。\n"
-                        "6. 明日のチャレンジに向けて店長が前向きになれる一言メッセージも最後に添えてください。\n"
-                        "\n"
-                        "【制約と補足】\n"
-                        "- 分析や提案ではsales_chart.png（商品別売上棒グラフ）も参照した体裁ですが、数値や予測の根拠は必ずuriage.txtの履歴のみを使ってください。\n"
-                        "- 提案は現実的かつ短期的にも実行しやすいものを必ず含めてください。\n"
-                        "\n"
-                        "売上履歴(uriage.txt)：\n"
-                        f"{uriage_content}"
-                    )
+                            # 絞り込み済みfiltered_dfをテキスト化
+                            uriage_content = view_df.to_csv(index=False, header=True, encoding="utf-8")
 
-                    client = genai.Client(api_key=GOOGLE_API_KEY.strip())
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=prompt
-                    )
-                    st.markdown("#### --- AIアドバイザーからの回答 ---")
-                    st.write(response.text)
-            except Exception as e:
-                st.error(f"エラーが発生しました: {e}")
+                            prompt = (
+                                "現在、ユーザーは特定の条件でデータを絞り込んでいます。このデータセットのみに基づいて分析してください。\n"
+                                "あなたは10年の経験を持つ敏腕経営コンサルタントです。\n"
+                                "以下の売上履歴は、スタッフまたは店長の希望する特定の条件でフィルターされた限定的な範囲の売上データです。\n"
+                                "この範囲だけに集中して、質問の分析や提案・戦略を作成してください。"
+                                "\n"
+                                "また、このデータは「日時, 商品名, 売上金額, 利益」というカラム名で、CSV形式で渡されます。\n"
+                                "以下のグラフ（sales_chart.png）もある体裁ですが、数値や予測の根拠は必ず今渡したフィルタ済みデータのみから推論してください。\n"
+                                "\n"
+                                "【アドバイス指示】\n"
+                                "1. 以下の売上履歴は1行ごとに「日時, 商品名, 売上金額, 利益」というフォーマットで記録されています。\n"
+                                "2. あなたはこのデータから、単なる売上合計だけでなく、以下を必ず計算し解説してください：\n"
+                                "   - 「全体の売上合計」\n"
+                                "   - 「全体のトータル利益（利益合計）」\n"
+                                "   - 「全体の利益率（トータル利益÷売上合計）」\n"
+                                "   - 商品別に売上・利益・利益率をまとめ、それぞれ商品ごとに比較・解説してください。\n"
+                                "3. 特に「どの商品が効率よく儲かっているか（利益額・利益率が高いか）」を明確に指摘してください。\n"
+                                "4. 利益を最大化するための戦略や提案（例：どの商品を重点的に売ると良いか、セット販売や価格調整のアイデアなど）を複数案、具体的に提案してください。\n"
+                                "5. 明日の売上や利益の予測も、なるべく数値を使って論理的に述べてください。\n"
+                                "6. 明日のチャレンジに向けて店長が前向きになれる一言メッセージも最後に添えてください。\n"
+                                "\n"
+                                "【制約と補足】\n"
+                                "- 分析や提案ではsales_chart.png（商品別売上棒グラフ）も参照した体裁ですが、数値や予測の根拠は必ずこの絞り込んだ売上データのみを使ってください。\n"
+                                "- 提案は現実的かつ短期的にも実行しやすいものを必ず含めてください。\n"
+                                "\n"
+                                "【売上履歴（フィルタ済みCSV）】\n"
+                                f"{uriage_content}"
+                            )
+
+                            client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+                            response = client.models.generate_content(
+                                model="gemini-2.5-flash",
+                                contents=prompt
+                            )
+                            st.markdown("#### --- AIアドバイザーからの回答 ---")
+                            st.write(response.text)
+                    except Exception as e:
+                        st.error(f"エラーが発生しました: {e}")
 
 # 4. 商品設定
 elif menu == "商品設定":
