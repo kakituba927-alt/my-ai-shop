@@ -5,6 +5,7 @@ import subprocess
 import sys
 import pandas as pd
 import numpy as np
+import japanize_matplotlib  # ★ 日本語グラフ化け防止のため必ずimport
 
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]  # secrets.toml or Streamlit Cloud secretsに必ず設定
@@ -164,6 +165,7 @@ elif menu == "一括表示":
 
         # グラフ生成(Pandas+Matplotlibでスマートに)
         import matplotlib.pyplot as plt
+        # ★★★ ここでjapanize_matplotlibにより日本語が化けずに描画される ★★★
 
         st.markdown("### ▼ 商品別売上集計グラフ")
         if st.button("最新のグラフで集計を見る（PNGも更新）"):
