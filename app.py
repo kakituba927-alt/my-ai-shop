@@ -3,6 +3,8 @@ import datetime
 import os
 import subprocess
 import sys
+import pandas as pd
+import numpy as np
 
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]  # secrets.toml or Streamlit Cloud secretsに必ず設定
@@ -57,24 +59,32 @@ def append_sales(product_name, price, cost):
         # 「日時, 商品名, 売上金額, 利益」
         f.write(f"{now}, {product_name}, {price}, {profit}\n")
 
-def calc_total_sales():
+# DataFrameの読み込み用関数
+def load_sales_df():
     ensure_file_exists(URIAGE_FILE)
-    total = 0
-    with open(URIAGE_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            parts = [p.strip() for p in line.strip().split(",")]
-            if len(parts) >= 3:
-                try:
-                    total += int(parts[2])
-                except ValueError:
-                    continue
-    return total
+    if os.path.getsize(URIAGE_FILE) == 0:
+        # 空ファイルなら空DataFrameで返す
+        return pd.DataFrame(columns=["日時", "商品名", "売上金額", "利益"])
+    try:
+        df = pd.read_csv(
+            URIAGE_FILE,
+            names=["日時", "商品名", "売上金額", "利益"],
+            header=None,
+            encoding="utf-8"
+        )
+        # 安全のため必要な列の型変換
+        df["売上金額"] = pd.to_numeric(df["売上金額"], errors="coerce").fillna(0).astype(int)
+        df["利益"] = pd.to_numeric(df["利益"], errors="coerce").fillna(0).astype(int)
+        return df
+    except Exception as e:
+        st.error(f"売上データの読込時にエラーが発生しました: {e}")
+        return pd.DataFrame(columns=["日時", "商品名", "売上金額", "利益"])
 
-# サイドバーのメニュー（『商品設定』を追加）
+# サイドバーのメニュー（『商品設定』を追加＋"一括表示"に置換）
 st.sidebar.title("ショップ管理メニュー")
 menu = st.sidebar.radio(
     "メニューを選択してください",
-    ("売上入力", "集計表示", "AI相談", "商品設定")
+    ("売上入力", "一括表示", "AI相談", "商品設定")
 )
 
 # 1. 売上入力画面
@@ -98,33 +108,102 @@ if menu == "売上入力":
             append_sales(product, price, cost)
             st.success("売上を記録しました！")
 
-# 2. 集計表示
-elif menu == "集計表示":
-    st.header("売上集計表示")
-    total = calc_total_sales()
-    st.subheader(f"現在の売上合計: {total} 円")
+# 2. 一括表示（集計強化）
+elif menu == "一括表示":
+    st.header("売上一覧・集計＆統計分析 (Pandas利用)")
 
-    # --- パワーアップ: 最新グラフ作成ボタン追加 ---
-    if st.button("最新のグラフで集計を見る"):
-        with st.spinner("グラフを作成中..."):
-            try:
-                result = subprocess.run(
-                    [sys.executable, GRAPH_FILE],
-                    capture_output=True, text=True
-                )
-                if result.returncode != 0:
-                    st.error("グラフ生成（graph.py）でエラーが発生しました。")
-                    st.text(result.stderr)
-                else:
-                    st.info("最新のグラフを作成しました。")
-            except Exception as e:
-                st.error(f"グラフ作成の実行中にエラーが発生しました: {e}")
-
-    # sales_chart.pngが存在していれば表示、なければ注意喚起
-    if os.path.exists(CHART_FILE):
-        st.image(CHART_FILE, caption="商品別売上集計グラフ")
+    df = load_sales_df()
+    if df.empty:
+        st.warning("まだ売上データがありません。")
     else:
-        st.warning("グラフ画像（sales_chart.png）が存在しません。\n[最新のグラフで集計を見る]ボタンを押してグラフを更新してください。")
+        # 表示用に整形
+        styled_df = df.copy()
+        # 日時を昇順（古→新）
+        styled_df = styled_df.sort_values("日時", ascending=True)
+
+        st.subheader("■ 売上履歴データ (最新順)")
+        st.dataframe(styled_df[::-1], hide_index=True, use_container_width=True)
+
+        # 基本統計
+        st.markdown("### ▼ 統計情報まとめ")
+        total_sales = int(df["売上金額"].sum())
+        max_sales = int(df["売上金額"].max())
+        avg_sales = float(df["売上金額"].mean()) if not df["売上金額"].empty else 0
+        total_profit = int(df["利益"].sum())
+        avg_profit = float(df["利益"].mean()) if not df["利益"].empty else 0
+        order_count = len(df)
+        avg_unit_price = avg_sales  # 1明細＝1客なら平均客単価≒平均売上金額
+
+        stats_cols = st.columns(3)
+        stats_cols[0].metric("最高売上額", f"{max_sales:,} 円")
+        stats_cols[1].metric("平均客単価", f"{avg_unit_price:,.0f} 円")
+        stats_cols[2].metric("総利益", f"{total_profit:,} 円")
+
+        st.write(f"**売上件数:** {order_count:,} 回　　**平均利益:** {avg_profit:,.1f} 円")
+
+        # 詳細商品別集計
+        st.markdown("### ▼ 商品ごとの集計（売上・利益・利益率）")
+        group = (
+            df.groupby("商品名")
+            .agg(
+                件数=("売上金額", "count"),
+                売上合計=("売上金額", "sum"),
+                利益合計=("利益", "sum"),
+                平均単価=("売上金額", "mean"),
+                平均利益=("利益", "mean"),
+            )
+            .reset_index()
+        )
+        group["利益率(%)"] = np.where(
+            group["売上合計"] > 0,
+            (group["利益合計"] / group["売上合計"] * 100).round(1),
+            0
+        )
+        group = group.sort_values("売上合計", ascending=False)
+        st.dataframe(group, use_container_width=True)
+
+        # グラフ生成(Pandas+Matplotlibでスマートに)
+        import matplotlib.pyplot as plt
+
+        st.markdown("### ▼ 商品別売上集計グラフ")
+        if st.button("最新のグラフで集計を見る（PNGも更新）"):
+            with st.spinner("グラフを作成中..."):
+                try:
+                    result = subprocess.run(
+                        [sys.executable, GRAPH_FILE],
+                        capture_output=True, text=True
+                    )
+                    if result.returncode != 0:
+                        st.error("グラフ生成（graph.py）でエラーが発生しました。")
+                        st.text(result.stderr)
+                    else:
+                        st.info("最新のグラフを作成しました。")
+                except Exception as e:
+                    st.error(f"グラフ作成の実行中にエラーが発生しました: {e}")
+
+        # グラフをStreamlitでも即時描画
+        fig, ax = plt.subplots(figsize=(6, 4))
+        group.plot(
+            kind="bar",
+            x="商品名",
+            y="売上合計",
+            legend=False,
+            ax=ax,
+            color="#79A3F4"
+        )
+        ax.set_xlabel("商品名", fontsize=12)
+        ax.set_ylabel("合計売上(円)", fontsize=12)
+        ax.set_title("商品別売上集計", fontsize=14)
+        for i, v in enumerate(group["売上合計"]):
+            ax.text(i, v, f"{v:,}", ha="center", va="bottom", fontsize=10)
+        plt.tight_layout()
+        st.pyplot(fig)
+
+        # PNG画像（外部保存）も表示
+        if os.path.exists(CHART_FILE):
+            st.image(CHART_FILE, caption="保存済みグラフ画像（sales_chart.png）")
+        else:
+            st.info("（PNG画像：sales_chart.png がまだありません。ボタンから生成してください）")
 
 # 3. AI相談
 elif menu == "AI相談":
