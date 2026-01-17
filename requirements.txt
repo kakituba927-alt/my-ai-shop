@@ -3,3 +3,4 @@ google-genai
 matplotlib
 japanize-matplotlib
 setuptools
+pandas
