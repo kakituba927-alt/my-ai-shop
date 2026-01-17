@@ -109,30 +109,81 @@ if menu == "売上入力":
             append_sales(product, price, cost)
             st.success("売上を記録しました！")
 
-# 2. 一括表示（集計強化）
+# 2. 一括表示（集計強化・フィルタ機能付き）
 elif menu == "一括表示":
     st.header("売上一覧・集計＆統計分析 (Pandas利用)")
 
     df = load_sales_df()
+
     if df.empty:
         st.warning("まだ売上データがありません。")
     else:
+        # --- メイン画面上部に横並びでフィルター配置 ---
+        # 商品名一覧（ユニーク）
+        df["日時_dt"] = pd.to_datetime(df["日時"], errors="coerce")
+        unique_products = sorted(df["商品名"].dropna().unique())
+        min_date = df["日時_dt"].min()
+        max_date = df["日時_dt"].max()
+        # デフォルト期間:全期間
+        default_start = min_date.date() if pd.notnull(min_date) else datetime.date.today()
+        default_end = max_date.date() if pd.notnull(max_date) else datetime.date.today()
+
+        filter_cols = st.columns([2,1,1])
+        selected_products = filter_cols[0].multiselect(
+            "商品名で絞り込み",
+            options=unique_products,
+            default=unique_products,
+            key="main_filter_products"
+        )
+        start_date = filter_cols[1].date_input(
+            "開始日",
+            value=default_start,
+            min_value=default_start,
+            max_value=default_end,
+            key="main_filter_start_date"
+        )
+        end_date = filter_cols[2].date_input(
+            "終了日",
+            value=default_end,
+            min_value=default_start,
+            max_value=default_end,
+            key="main_filter_end_date"
+        )
+
+        # --- フィルタ適用 ---
+        filtered_df = df.copy()
+
+        # 商品名でフィルタ
+        if selected_products:
+            filtered_df = filtered_df[filtered_df["商品名"].isin(selected_products)]
+        else:
+            filtered_df = filtered_df.iloc[0:0]  # 何も表示しない
+
+        # 日付範囲でフィルタ
+        start_datetime = pd.to_datetime(start_date)
+        # 終了日はその日23:59:59まで含める
+        end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        filtered_df = filtered_df[
+            (filtered_df["日時_dt"] >= start_datetime) &
+            (filtered_df["日時_dt"] <= end_datetime)
+        ]
+
         # 表示用に整形
-        styled_df = df.copy()
-        # 日時を昇順（古→新）
+        styled_df = filtered_df.copy()
         styled_df = styled_df.sort_values("日時", ascending=True)
 
-        st.subheader("■ 売上履歴データ (最新順)")
-        st.dataframe(styled_df[::-1], hide_index=True, use_container_width=True)
+        st.subheader("■ 売上履歴データ (最新順) ※絞り込み反映")
+        st.dataframe(styled_df[::-1][["日時", "商品名", "売上金額", "利益"]], hide_index=True, use_container_width=True)
 
-        # 基本統計
-        st.markdown("### ▼ 統計情報まとめ")
-        total_sales = int(df["売上金額"].sum())
-        max_sales = int(df["売上金額"].max())
-        avg_sales = float(df["売上金額"].mean()) if not df["売上金額"].empty else 0
-        total_profit = int(df["利益"].sum())
-        avg_profit = float(df["利益"].mean()) if not df["利益"].empty else 0
-        order_count = len(df)
+        # --- フィルタ後の統計 ---
+        st.markdown("### ▼ 統計情報まとめ (絞り込み条件反映)")
+
+        total_sales = int(filtered_df["売上金額"].sum())
+        max_sales = int(filtered_df["売上金額"].max()) if len(filtered_df) > 0 else 0
+        avg_sales = float(filtered_df["売上金額"].mean()) if not filtered_df["売上金額"].empty else 0
+        total_profit = int(filtered_df["利益"].sum())
+        avg_profit = float(filtered_df["利益"].mean()) if not filtered_df["利益"].empty else 0
+        order_count = len(filtered_df)
         avg_unit_price = avg_sales  # 1明細＝1客なら平均客単価≒平均売上金額
 
         stats_cols = st.columns(3)
@@ -143,9 +194,9 @@ elif menu == "一括表示":
         st.write(f"**売上件数:** {order_count:,} 回　　**平均利益:** {avg_profit:,.1f} 円")
 
         # 詳細商品別集計
-        st.markdown("### ▼ 商品ごとの集計（売上・利益・利益率）")
+        st.markdown("### ▼ 商品ごとの集計（売上・利益・利益率）(絞り込み反映)")
         group = (
-            df.groupby("商品名")
+            filtered_df.groupby("商品名")
             .agg(
                 件数=("売上金額", "count"),
                 売上合計=("売上金額", "sum"),
@@ -167,7 +218,7 @@ elif menu == "一括表示":
         import matplotlib.pyplot as plt
         # ★★★ ここでjapanize_matplotlibにより日本語が化けずに描画される ★★★
 
-        st.markdown("### ▼ 商品別売上集計グラフ")
+        st.markdown("### ▼ 商品別売上集計グラフ (絞り込み反映)")
         if st.button("最新のグラフで集計を見る（PNGも更新）"):
             with st.spinner("グラフを作成中..."):
                 try:
@@ -185,21 +236,24 @@ elif menu == "一括表示":
 
         # グラフをStreamlitでも即時描画
         fig, ax = plt.subplots(figsize=(6, 4))
-        group.plot(
-            kind="bar",
-            x="商品名",
-            y="売上合計",
-            legend=False,
-            ax=ax,
-            color="#79A3F4"
-        )
-        ax.set_xlabel("商品名", fontsize=12)
-        ax.set_ylabel("合計売上(円)", fontsize=12)
-        ax.set_title("商品別売上集計", fontsize=14)
-        for i, v in enumerate(group["売上合計"]):
-            ax.text(i, v, f"{v:,}", ha="center", va="bottom", fontsize=10)
-        plt.tight_layout()
-        st.pyplot(fig)
+        if not group.empty and group["売上合計"].sum() > 0:
+            group.plot(
+                kind="bar",
+                x="商品名",
+                y="売上合計",
+                legend=False,
+                ax=ax,
+                color="#79A3F4"
+            )
+            ax.set_xlabel("商品名", fontsize=12)
+            ax.set_ylabel("合計売上(円)", fontsize=12)
+            ax.set_title("商品別売上集計", fontsize=14)
+            for i, v in enumerate(group["売上合計"]):
+                ax.text(i, v, f"{v:,}", ha="center", va="bottom", fontsize=10)
+            plt.tight_layout()
+            st.pyplot(fig)
+        else:
+            st.info("該当データがありませんのでグラフは表示できません。")
 
         # PNG画像（外部保存）も表示
         if os.path.exists(CHART_FILE):
