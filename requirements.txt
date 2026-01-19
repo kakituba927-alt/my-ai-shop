@@ -4,4 +4,4 @@ matplotlib
 japanize-matplotlib
 setuptools
 pandas
-pypdf
+pip install pdfplumber
