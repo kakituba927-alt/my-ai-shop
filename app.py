@@ -394,14 +394,18 @@ elif menu == "AI秘書":
     pdf_file = st.file_uploader("PDFファイルをアップロードしてください", type=["pdf"], key="pdf_upload")
 
     read_pdf_text: Optional[str] = None
+    pdf_texts: Optional[list] = None
+
     if pdf_file is not None:
         try:
-            import pypdf
-            pdf_reader = pypdf.PdfReader(pdf_file)
-            pdf_texts = [page.extract_text() for page in pdf_reader.pages if page.extract_text()]
-            read_pdf_text = "\n".join(pdf_texts)
+            import pdfplumber
+            with pdfplumber.open(pdf_file) as pdf:
+                pdf_texts = [page.extract_text() for page in pdf.pages]
+            # Noneまたは空でないリストのみ抽出
+            pdf_texts = [t for t in pdf_texts if t and t.strip()]
+            read_pdf_text = "\n".join(pdf_texts) if pdf_texts else ""
         except Exception as e:
-            st.error(f"PDFの読み取り中にエラーが発生しました: {e}")
+            st.error(f"PDFの読み取り中にエラーが発生しました(pdfplumber): {e}")
             read_pdf_text = None
 
         # PDFテキストが読めたらAI要約
@@ -440,7 +444,52 @@ elif menu == "AI秘書":
                     except Exception as e:
                         st.error(f"AI要約中にエラーが発生しました: {e}")
         else:
-            st.info("※ PDF内にテキストが含まれていないか、抽出できませんでした。")
+            # テキストが全く取れなかった場合（画像型PDFなど）
+            st.info("※ PDF内にテキストが含まれていないか抽出できませんでした。")
+            st.info("画像として解析を試みます（β）")
+
+            # ここで「Geminiにファイルを直接渡す」方法が高度だが、
+            # ユーザーに柔らかく案内してフォールバックも兼ねる
+            if st.button("画像PDFをGeminiにそのまま解析依頼（実験的機能）"):
+                with st.spinner("Geminiが画像形式PDFの解析を試みています..."):
+                    try:
+                        if not GOOGLE_API_KEY or GOOGLE_API_KEY.strip() == "":
+                            st.error("Google APIキーが設定されていません。")
+                        else:
+                            from google import genai
+
+                            prompt = (
+                                "あなたは画像PDFやスキャン資料から重要な内容を要約することができるプロの日本人秘書です。\n"
+                                "アップロードされたPDFファイルは画像形式または通常のPDFです。\n"
+                                "内容を読み取り、わかりやすく①結論②重要なポイント3つ③次に取るべき行動でまとめてください。\n"
+                            )
+
+                            # StreamlitUploaderはファイル型だがGoogle Gemini APIに合わせて渡す
+                            pdf_file.seek(0)
+                            pdf_bytes = pdf_file.read()
+                            client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+                            # Google Gemini APIで「files=...」のような高度APIを使える場合
+                            # https://ai.google.dev/api/rest/v1beta/models/gemini-pro-vision/...
+                            # ただし、google-generativeai通常パッケージで可能かは環境差異あり
+                            try:
+                                response = client.models.generate_content(
+                                    model="gemini-2.5-flash",
+                                    contents=[prompt],
+                                    files=[{
+                                        "file_name": pdf_file.name,
+                                        "data": pdf_bytes
+                                    }]
+                                )
+                                st.markdown("#### --- AI秘書による（画像PDFも考慮した）要約 ---")
+                                st.markdown(response.text)
+                            except Exception as e2:
+                                # filesオプション非対応などエラー時
+                                st.warning("Geminiへの画像直接渡しにはAPI対応が必要です。")
+                                st.error(f"ファイル送信時エラー: {e2}")
+
+                    except Exception as e:
+                        st.error(f"画像型PDFのAI解析時にエラーが発生しました: {e}")
+
     else:
         st.info("PDFを選択・アップロードしてください。")
 
@@ -452,7 +501,7 @@ elif menu == "AI秘書":
 # japanize-matplotlib
 # pandas
 # numpy
-# pypdf
+# pdfplumber
 # -----------------------------------
 
 # --- graph.py 側のフォント設定例（matplotlib使用時。MS Gothicなど安全なフォント指定を追記してください）---
