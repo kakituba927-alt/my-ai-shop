@@ -7,6 +7,10 @@ import pandas as pd
 import numpy as np
 import japanize_matplotlib  # ★ 日本語グラフ化け防止のため必ずimport
 
+# --- 必要なライブラリ追加 ---
+import io
+from typing import Optional
+
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]  # secrets.toml or Streamlit Cloud secretsに必ず設定
 
@@ -101,7 +105,7 @@ else:
 st.sidebar.title("ショップ管理メニュー")
 menu = st.sidebar.radio(
     "メニューを選択してください",
-    ("売上入力", "一括表示", "AI相談", "商品設定"),
+    ("売上入力", "一括表示", "AI相談", "商品設定", "AI秘書"),
     key="main_menu"
 )
 
@@ -378,6 +382,68 @@ elif menu == "商品設定":
     else:
         st.info("まだ商品が登録されていません。")
 
+# 5. AI秘書（PDF要約）
+elif menu == "AI秘書":
+    st.header("AI秘書（PDF要約）")
+    st.markdown(
+        "### PDF資料をアップロードすると、AI（Gemini）が内容をプロの秘書目線で分かりやすく要約します。\n"
+        "3点の要約：①結論 ②重要なポイント3つ ③次に取るべき行動"
+    )
+
+    # アップロード用
+    pdf_file = st.file_uploader("PDFファイルをアップロードしてください", type=["pdf"], key="pdf_upload")
+
+    read_pdf_text: Optional[str] = None
+    if pdf_file is not None:
+        try:
+            import pypdf
+            pdf_reader = pypdf.PdfReader(pdf_file)
+            pdf_texts = [page.extract_text() for page in pdf_reader.pages if page.extract_text()]
+            read_pdf_text = "\n".join(pdf_texts)
+        except Exception as e:
+            st.error(f"PDFの読み取り中にエラーが発生しました: {e}")
+            read_pdf_text = None
+
+        # PDFテキストが読めたらAI要約
+        if read_pdf_text and read_pdf_text.strip():
+            st.markdown("#### --- 抽出内容（AI用） ---")
+            with st.expander("PDF全文の内容を一時確認したい場合はこちら", expanded=False):
+                st.text_area("PDFの全文（AIに渡す内容）", read_pdf_text, height=200)
+
+            if st.button("AI秘書に要約してもらう！"):
+                with st.spinner("AIがPDF資料の内容を要約中...(Gemini)"):
+                    try:
+                        if not GOOGLE_API_KEY or GOOGLE_API_KEY.strip() == "":
+                            st.error("Google APIキーが設定されていません。")
+                        else:
+                            from google import genai
+
+                            prompt = (
+                                "あなたは資料を素早く要約することに長けたプロの日本人秘書です。\n"
+                                "以下のPDF資料テキスト内容を読んで、次の3点でコンパクトに分かりやすくまとめてください：\n"
+                                "①結論\n"
+                                "②重要なポイント3つ\n"
+                                "③次に取るべき行動\n"
+                                "\n"
+                                "【PDF資料内容】\n"
+                                f"{read_pdf_text}\n"
+                            )
+
+                            client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+                            response = client.models.generate_content(
+                                model="gemini-2.5-flash",
+                                contents=prompt
+                            )
+                            st.markdown("#### --- AI秘書による要約 ---")
+                            # 回答をMarkdownで読みやすく表示
+                            st.markdown(response.text)
+                    except Exception as e:
+                        st.error(f"AI要約中にエラーが発生しました: {e}")
+        else:
+            st.info("※ PDF内にテキストが含まれていないか、抽出できませんでした。")
+    else:
+        st.info("PDFを選択・アップロードしてください。")
+
 # --- requirements.txtの内容（このファイルをプロジェクト直下に新規で作成してください） ---
 # requirements.txt ------------------
 # streamlit
@@ -386,6 +452,7 @@ elif menu == "商品設定":
 # japanize-matplotlib
 # pandas
 # numpy
+# pypdf
 # -----------------------------------
 
 # --- graph.py 側のフォント設定例（matplotlib使用時。MS Gothicなど安全なフォント指定を追記してください）---
