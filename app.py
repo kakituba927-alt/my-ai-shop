@@ -639,76 +639,62 @@ elif menu == "AI秘書":
                     def generate_pdf_report(full_report, section_texts):
                         """
                         PDFの上下左右に15mm余白、日本語フォントIPAexGothicをセット、11pt標準。multi_cell(w=0, h=10,...)で自動折返し。set_auto_page_breakで自動改頁。タイトルは中央大きめ、中身は左詰。
+                        ※スタイル='B'などは絶対に使わず、全て通常スタイル。見出し/タイトルはフォントサイズ差で対応。
                         """
                         try:
                             pdf_bytes = None
                             font_path = None
-                            # カレントフォルダ内 "ipaexg.ttf" or "ipaexg"
                             for fname in ["ipaexg.ttf", "ipaexg"]:
                                 if os.path.exists(fname):
                                     font_path = fname
                                     break
                             font_set_success = False
                             font_name = "IPAexGothic"
-                            # 1. 15mm余白指定、A4
                             pdf = FPDF(orientation='P', unit='mm', format='A4')
-                            pdf.set_auto_page_break(auto=True, margin=15)  # 下余白も確実に15mm
-                            # 余白
+                            pdf.set_auto_page_break(auto=True, margin=15)
                             l_margin = r_margin = t_margin = 15
                             pdf.set_left_margin(l_margin)
                             pdf.set_right_margin(r_margin)
                             pdf.set_top_margin(t_margin)
                             pdf.add_page()
-                            # 2. IPAexGothicフォント(必須)、11pt
                             try:
                                 if font_path and os.path.exists(font_path):
+                                    # 追加はstyle=''だけ設定
                                     pdf.add_font(font_name, '', font_path, uni=True)
-                                    pdf.set_font(font_name, size=11)
                                     font_set_success = True
                                 else:
                                     st.error("PDF日本語フォント(ipaexg.ttf)が存在しません。このファイルを同じフォルダに置いてください。")
-                                    pdf.set_font("Arial", size=11)
                             except Exception as e_font:
                                 font_set_success = False
                                 st.warning("PDF用フォント(ipaexg.ttf)設定に失敗: {}".format(e_font))
-                                try:
-                                    pdf.set_font("Arial", size=11)
-                                except Exception:
-                                    pass
-                            # 3. 中央タイトル（最初のsectionタイトルのみ中央大きめ 16pt）
+                            # タイトル (中央/大きめ)
                             if section_texts:
-                                # タイトル用（AI秘書レポートなど最初のtitle決め打ち or 自動）
                                 title = "AI秘書レポート"
-                                pdf.set_y(t_margin)  # 上余白から
+                                pdf.set_y(t_margin)
+                                # タイトルはフォントサイズ20で強調
                                 if font_set_success:
-                                    pdf.set_font(font_name, size=16, style="B")
+                                    pdf.set_font(font_name, size=20)
                                 else:
-                                    pdf.set_font("Arial", size=16, style="B")
+                                    pdf.set_font("Arial", size=20)
                                 page_width = pdf.w - l_margin - r_margin
                                 th = pdf.font_size_pt * 1.8
                                 pdf.set_x(l_margin)
-                                # 中央タイトル
                                 pdf.cell(page_width, th, title, align='C', ln=1)
-                                pdf.ln(4)
-                            # 4. 本文（左詰め、multi_cell w=0 で両端余白まで最大幅、h=10で11pt, 自動折返し。section間に空行）
+                                pdf.ln(6)
+                            # 本文
                             content_font_size = 11
-                            if font_set_success:
-                                pdf.set_font(font_name, size=content_font_size)
-                            else:
-                                pdf.set_font("Arial", size=content_font_size)
-                            # セクションごと
+                            section_title_font_size = 15  # セクション見出しは普通より大きめで強調
                             for i, section in enumerate(section_texts):
                                 section_lines = section.splitlines()
-                                # 1行目: セクションタイトル的なもの（例: "【AI秘書要約】"など）は太字…としたい場合
                                 if section_lines:
-                                    # 段落タイトル判定
                                     firstline = section_lines[0]
+                                    # セクション見出しのみ大きく（太字不使用）
                                     if font_set_success:
-                                        pdf.set_font(font_name, size=content_font_size, style="B")
+                                        pdf.set_font(font_name, size=section_title_font_size)
                                     else:
-                                        pdf.set_font("Arial", size=content_font_size, style="B")
+                                        pdf.set_font("Arial", size=section_title_font_size)
                                     pdf.multi_cell(w=0, h=10, txt=firstline, align='L')
-                                    # 続き
+                                    # 続き: 通常サイズ
                                     if font_set_success:
                                         pdf.set_font(font_name, size=content_font_size)
                                     else:
@@ -720,7 +706,6 @@ elif menu == "AI秘書":
                                     pdf.ln(4)
                             try:
                                 out = pdf.output(dest='S')
-                                # fpdf2>=2.5.0: returns bytearray, so convert to bytes for Streamlit
                                 pdf_bytes = bytes(out)
                             except Exception as e_bytes:
                                 pdf_bytes = None
