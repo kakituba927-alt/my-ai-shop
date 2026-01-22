@@ -638,31 +638,32 @@ elif menu == "AI秘書":
                 with dl_cols[1]:
                     def generate_pdf_report(full_report, section_texts):
                         """
-                        PDF出力でUnicode日本語フォントが確実に使えるよう、カレントディレクトリのIPAexGothicフォント(ipaexg.ttf)を使う。
-                        ネットDLや一時ファイルは使用せず、ipaexg.ttfまたはipaexgをカレントフォルダから探す。
-                        横幅は self.epw を利用、自動対応。
-                        multi_cell の w=0 もしくは w=self.epw。
-                        日本語フォントサイズは12程度。
-                        出力バイト列はバイナリ(bytearray)を bytes() 変換で返す（encode()は不要）。
-                        エラーも優しく処理する。
+                        PDFの上下左右に15mm余白、日本語フォントIPAexGothicをセット、11pt標準。multi_cell(w=0, h=10,...)で自動折返し。set_auto_page_breakで自動改頁。タイトルは中央大きめ、中身は左詰。
                         """
                         try:
                             pdf_bytes = None
                             font_path = None
-                            # 1. フォントファイル探索（同一フォルダ内限定: "ipaexg.ttf"優先）
+                            # カレントフォルダ内 "ipaexg.ttf" or "ipaexg"
                             for fname in ["ipaexg.ttf", "ipaexg"]:
                                 if os.path.exists(fname):
                                     font_path = fname
                                     break
                             font_set_success = False
                             font_name = "IPAexGothic"
+                            # 1. 15mm余白指定、A4
                             pdf = FPDF(orientation='P', unit='mm', format='A4')
+                            pdf.set_auto_page_break(auto=True, margin=15)  # 下余白も確実に15mm
+                            # 余白
+                            l_margin = r_margin = t_margin = 15
+                            pdf.set_left_margin(l_margin)
+                            pdf.set_right_margin(r_margin)
+                            pdf.set_top_margin(t_margin)
                             pdf.add_page()
-                            epw = getattr(pdf, "epw", pdf.w - pdf.l_margin - pdf.r_margin)
+                            # 2. IPAexGothicフォント(必須)、11pt
                             try:
                                 if font_path and os.path.exists(font_path):
                                     pdf.add_font(font_name, '', font_path, uni=True)
-                                    pdf.set_font(font_name, size=12)
+                                    pdf.set_font(font_name, size=11)
                                     font_set_success = True
                                 else:
                                     st.error("PDF日本語フォント(ipaexg.ttf)が存在しません。このファイルを同じフォルダに置いてください。")
@@ -674,23 +675,49 @@ elif menu == "AI秘書":
                                     pdf.set_font("Arial", size=11)
                                 except Exception:
                                     pass
-                            # セクション毎に改行を適切に
-                            for section in section_texts:
-                                for line in section.splitlines():
-                                    if pdf.get_y() > 260:
-                                        pdf.add_page()
-                                        if font_set_success:
-                                            pdf.set_font(font_name, size=12)
-                                        else:
-                                            try:
-                                                pdf.set_font("Arial", size=11)
-                                            except Exception:
-                                                pass
-                                    try:
-                                        pdf.multi_cell(epw, 8, line)
-                                    except Exception:
-                                        pdf.multi_cell(epw, 8, "（表示失敗）")
+                            # 3. 中央タイトル（最初のsectionタイトルのみ中央大きめ 16pt）
+                            if section_texts:
+                                # タイトル用（AI秘書レポートなど最初のtitle決め打ち or 自動）
+                                title = "AI秘書レポート"
+                                pdf.set_y(t_margin)  # 上余白から
+                                if font_set_success:
+                                    pdf.set_font(font_name, size=16, style="B")
+                                else:
+                                    pdf.set_font("Arial", size=16, style="B")
+                                page_width = pdf.w - l_margin - r_margin
+                                th = pdf.font_size_pt * 1.8
+                                pdf.set_x(l_margin)
+                                # 中央タイトル
+                                pdf.cell(page_width, th, title, align='C', ln=1)
                                 pdf.ln(4)
+                            # 4. 本文（左詰め、multi_cell w=0 で両端余白まで最大幅、h=10で11pt, 自動折返し。section間に空行）
+                            content_font_size = 11
+                            if font_set_success:
+                                pdf.set_font(font_name, size=content_font_size)
+                            else:
+                                pdf.set_font("Arial", size=content_font_size)
+                            # セクションごと
+                            for i, section in enumerate(section_texts):
+                                section_lines = section.splitlines()
+                                # 1行目: セクションタイトル的なもの（例: "【AI秘書要約】"など）は太字…としたい場合
+                                if section_lines:
+                                    # 段落タイトル判定
+                                    firstline = section_lines[0]
+                                    if font_set_success:
+                                        pdf.set_font(font_name, size=content_font_size, style="B")
+                                    else:
+                                        pdf.set_font("Arial", size=content_font_size, style="B")
+                                    pdf.multi_cell(w=0, h=10, txt=firstline, align='L')
+                                    # 続き
+                                    if font_set_success:
+                                        pdf.set_font(font_name, size=content_font_size)
+                                    else:
+                                        pdf.set_font("Arial", size=content_font_size)
+                                    for line in section_lines[1:]:
+                                        pdf.multi_cell(w=0, h=10, txt=line, align='L')
+                                    pdf.ln(4)
+                                else:
+                                    pdf.ln(4)
                             try:
                                 out = pdf.output(dest='S')
                                 # fpdf2>=2.5.0: returns bytearray, so convert to bytes for Streamlit
