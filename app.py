@@ -640,52 +640,78 @@ elif menu == "AI秘書":
                 with dl_cols[1]:
                     # PDF作成用関数
                     def generate_pdf_report(full_report, font_url="https://github.com/googlefonts/ipaexfont/raw/main/fonts/ipaexg.ttf"):
-                        # 1. IPAexGothic（ipaexg.ttf）DL
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as tf:
-                            font_path = tf.name
-                            # 既にDL済みの場合スキップしたいが、単純DL
-                            r = requests.get(font_url)
-                            tf.write(r.content)
-                        pdf = FPDF(orientation='P', unit='mm', format='A4')
-                        pdf.add_page()
-                        # 日本語フォント登録
+                        """
+                        PDF出力でUnicode日本語フォントが確実に使えるように、IPAexGothicを都度DL。  
+                        FPDFUnicodeEncodingExceptionにも対応した堅牢なPDFエクスポート関数。
+                        失敗時もアプリ停止しないよう例外ハンドリングを強く。
+                        """
+                        font_path = None
+                        pdf_bytes = None
                         try:
-                            pdf.add_font('IPAexGothic', '', font_path, uni=True)
-                            font_name = 'IPAexGothic'
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as tf:
+                                font_path = tf.name
+                                # フォントをインターネットから確実にダウンロード
+                                r = requests.get(font_url)
+                                r.raise_for_status()
+                                tf.write(r.content)
+                            pdf = FPDF(orientation='P', unit='mm', format='A4')
+                            pdf.add_page()
+                            # 日本語フォントをUnicodeモードで追加
+                            try:
+                                pdf.add_font('IPAexGothic', '', font_path, uni=True)
+                                font_name = 'IPAexGothic'
+                                pdf.set_font(font_name, size=13)
+                            except Exception as e_font:
+                                font_name = ''
+                                pdf.set_font("Arial", size=12)
+                            # セクション毎に改行を適切に
+                            for section in section_texts:
+                                for line in section.splitlines():
+                                    if pdf.get_y() > 260:
+                                        pdf.add_page()
+                                        if font_name:
+                                            pdf.set_font(font_name, size=13)
+                                        else:
+                                            pdf.set_font("Arial", size=12)
+                                    try:
+                                        pdf.multi_cell(0, 8, line)
+                                    except Exception as ee:
+                                        # 万一日本語で失敗時は無視し空行で置換
+                                        pdf.multi_cell(0, 8, "（表示失敗）")
+                                pdf.ln(4)
+                            try:
+                                pdf_bytes = pdf.output(dest='S').encode('latin1')
+                            except Exception as e_bytes:
+                                pdf_bytes = None
+                                st.error("PDF保存時にエラーが発生しました（日本語が含まれる場合は文字化け・保存失敗の可能性があります）: {}".format(e_bytes))
                         except Exception as e:
-                            # フォールバック
-                            font_name = ''
-                        if font_name:
-                            pdf.set_font(font_name, size=13)
-                        else:
-                            pdf.set_font("Arial", size=12)
+                            pdf_bytes = None
+                            st.error("PDF作成に失敗しました: {}".format(e))
+                        finally:
+                            # クリーンナップ
+                            if font_path and os.path.exists(font_path):
+                                try:
+                                    os.remove(font_path)
+                                except Exception:
+                                    pass
+                        return pdf_bytes
 
-                        # セクション毎に改行を適切に
-                        for section in section_texts:
-                            for line in section.splitlines():
-                                # 改ページ制御
-                                if pdf.get_y() > 260:
-                                    pdf.add_page()
-                                    pdf.set_font(font_name, size=13) if font_name else pdf.set_font("Arial", size=12)
-                                pdf.multi_cell(0, 8, line)
-                            pdf.ln(4)
-                        # PDF内容をバイトで返す
-                        pdf_output = pdf.output(dest='S').encode('latin1')
-                        # クリーンナップ
-                        try:
-                            os.remove(font_path)
-                        except Exception:
-                            pass
-                        return pdf_output
+                    # PDF作成を安全に呼ぶ・例外でアプリ落ちを防ぐ
+                    pdf_bytes = None
+                    try:
+                        pdf_bytes = generate_pdf_report(full_report)
+                    except Exception as e:
+                        st.error("PDF生成中に致命的なエラーが発生しました: {}".format(e))
+                    if pdf_bytes:
+                        st.download_button(
+                            label="レポートをPDFで保存",
+                            data=pdf_bytes,
+                            file_name="AI秘書レポート.pdf",
+                            mime="application/pdf"
+                        )
+                    else:
+                        st.warning("PDF出力に失敗しました。英語名やテキスト保存は可能です。")
 
-                    # PDF内容生成しボタン化
-                    pdf_bytes = generate_pdf_report(full_report)
-                    st.download_button(
-                        label="レポートをPDFで保存",
-                        data=pdf_bytes,
-                        file_name="AI秘書レポート.pdf",
-                        mime="application/pdf"
-                    )
             # ===== ▲▲▲ ダウンロードボタン追加ここまで（TXT+PDF） ▲▲▲ ==========
 
         else:
