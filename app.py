@@ -642,6 +642,10 @@ elif menu == "AI秘書":
                         PDF出力でUnicode日本語フォントが確実に使えるよう、カレントディレクトリのIPAexGothicフォントを使う。
                         ネットDLや一時ファイルは使用せず、ipaexg.ttfまたはipaexgをカレントフォルダから探す。
                         fail-safeでPDF生成の堅牢な関数。
+                        修正点:
+                          - 横幅は self.epw を利用、自動対応
+                          - multi_cell の w=0 もしくは w=self.epw
+                          - 日本語フォントサイズは12程度にダウン（はみ出し防止）
                         """
                         pdf_bytes = None
                         font_path = None
@@ -654,19 +658,21 @@ elif menu == "AI秘書":
                         font_name = "IPAexGothic"
                         pdf = FPDF(orientation='P', unit='mm', format='A4')
                         pdf.add_page()
+                        # epw = 有効ページ幅（横マージン差し引き済み幅）
+                        epw = getattr(pdf, "epw", pdf.w - pdf.l_margin - pdf.r_margin)
                         try:
                             if font_path:
                                 pdf.add_font(font_name, '', font_path, uni=True)
-                                pdf.set_font(font_name, size=13)
+                                pdf.set_font(font_name, size=12)  # 13→12に下げる
                                 font_set_success = True
                             else:
                                 st.error("PDF日本語フォント(ipaexg.ttf)が存在しません。このファイルを同じフォルダに置いてください。")
-                                pdf.set_font("Arial", size=12)
+                                pdf.set_font("Arial", size=11)
                         except Exception as e_font:
                             font_set_success = False
                             st.error("PDF用フォント(ipaexg.ttf)設定に失敗: {}".format(e_font))
                             try:
-                                pdf.set_font("Arial", size=12)
+                                pdf.set_font("Arial", size=11)
                             except Exception:
                                 pass
                         # セクション毎に改行を適切に
@@ -675,17 +681,17 @@ elif menu == "AI秘書":
                                 if pdf.get_y() > 260:
                                     pdf.add_page()
                                     if font_set_success:
-                                        pdf.set_font(font_name, size=13)
+                                        pdf.set_font(font_name, size=12)
                                     else:
                                         try:
-                                            pdf.set_font("Arial", size=12)
+                                            pdf.set_font("Arial", size=11)
                                         except Exception:
                                             pass
                                 try:
-                                    # fpdf2はutf-8(uni=True)なら日本語も multi_cell でOK
-                                    pdf.multi_cell(0, 8, line)
+                                    # 横幅(epw)を指定。0（カレントセル幅最大）も可だがepw明示のほうが安全
+                                    pdf.multi_cell(epw, 8, line)
                                 except Exception as ee:
-                                    pdf.multi_cell(0, 8, "（表示失敗）")
+                                    pdf.multi_cell(epw, 8, "（表示失敗）")
                             pdf.ln(4)
                         try:
                             pdf_bytes = pdf.output(dest='S').encode('latin1')
