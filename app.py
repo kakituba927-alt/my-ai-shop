@@ -12,7 +12,7 @@ import io
 from typing import Optional
 
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
-GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]  # secrets.toml or Streamlit Cloud secretsに必ず設定
+GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 
 # ====== ファイル名を"MyAI/"無しに統一 ======
 URIAGE_FILE = "uriage.txt"
@@ -21,17 +21,13 @@ MASTER_FILE = "master_data.txt"
 GRAPH_FILE = "graph.py"
 
 def ensure_file_exists(path):
-    """指定のファイルが存在しなければ空ファイルを作成する。"""
-    # グラフ等の画像/pyファイルは確認しない
     if path in [CHART_FILE, GRAPH_FILE]:
         return
     if not os.path.exists(path):
         with open(path, "w", encoding="utf-8"):
             pass
 
-# 商品マスター情報の読み書き用関数
 def load_master_data():
-    """master_data.txtから商品名・金額・原価の辞書を返す"""
     ensure_file_exists(MASTER_FILE)
     master = {}
     with open(MASTER_FILE, "r", encoding="utf-8") as f:
@@ -51,7 +47,6 @@ def load_master_data():
     return master
 
 def save_master_data(master):
-    """商品マスター辞書をファイルに保存"""
     with open(MASTER_FILE, "w", encoding="utf-8") as f:
         for name, info in master.items():
             f.write(f"{name}, {info['price']}, {info['cost']}\n")
@@ -61,14 +56,11 @@ def append_sales(product_name, price, cost):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     profit = price - cost
     with open(URIAGE_FILE, "a", encoding="utf-8") as f:
-        # 「日時, 商品名, 売上金額, 利益」
         f.write(f"{now}, {product_name}, {price}, {profit}\n")
 
-# DataFrameの読み込み用関数
 def load_sales_df():
     ensure_file_exists(URIAGE_FILE)
     if os.path.getsize(URIAGE_FILE) == 0:
-        # 空ファイルなら空DataFrameで返す
         return pd.DataFrame(columns=["日時", "商品名", "売上金額", "利益"])
     try:
         df = pd.read_csv(
@@ -77,7 +69,6 @@ def load_sales_df():
             header=None,
             encoding="utf-8"
         )
-        # 安全のため必要な列の型変換
         df["売上金額"] = pd.to_numeric(df["売上金額"], errors="coerce").fillna(0).astype(int)
         df["利益"] = pd.to_numeric(df["利益"], errors="coerce").fillna(0).astype(int)
         return df
@@ -86,8 +77,6 @@ def load_sales_df():
         return pd.DataFrame(columns=["日時", "商品名", "売上金額", "利益"])
 
 # -------- フィルター状態（商品・日付範囲）はサイドバーで管理して全体で共通 --------
-
-# 共通のSalesデータ
 df = load_sales_df()
 if not df.empty:
     df["日時_dt"] = pd.to_datetime(df["日時"], errors="coerce")
@@ -101,7 +90,6 @@ else:
     default_start = datetime.date.today()
     default_end = datetime.date.today()
 
-# ---- サイドバーのメニュー＆フィルター ----
 st.sidebar.title("ショップ管理メニュー")
 menu = st.sidebar.radio(
     "メニューを選択してください",
@@ -109,7 +97,6 @@ menu = st.sidebar.radio(
     key="main_menu"
 )
 
-# フィルター: 商品と日付範囲
 with st.sidebar:
     st.markdown("### ▼ 売上一覧・AI分析用フィルター")
     filter_disable = len(unique_products) == 0
@@ -136,19 +123,20 @@ with st.sidebar:
         key="global_end_date",
         disabled=filter_disable
     )
+    # 理解度テスト出題ボタンをAI秘書と共通セッションで利用
+    if menu == "AI秘書":
+        test_btn = st.button("この資料から3問、理解度テストを作成する", key="make_quiz_sidebar")
+    else:
+        test_btn = False
 
-# --- グローバルフィルター適用（売上一覧・AI相談） ---
 def get_filtered_sales(df):
     if df.empty:
         return df
-    # 商品名で絞り込み
     filtered = df.copy()
     if selected_products:
         filtered = filtered[filtered["商品名"].isin(selected_products)]
     else:
-        # 何も選択されてなければ空
         filtered = filtered.iloc[0:0]
-    # 日付範囲
     try:
         start_dt = pd.to_datetime(start_date)
         end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
@@ -160,7 +148,6 @@ def get_filtered_sales(df):
         filtered = filtered.iloc[0:0]
     return filtered
 
-# 1. 売上入力画面
 if menu == "売上入力":
     st.header("売上入力")
     product_info = load_master_data()
@@ -181,7 +168,6 @@ if menu == "売上入力":
             append_sales(product, price, cost)
             st.success("売上を記録しました！")
 
-# 2. 一括表示（集計強化・フィルタ機能付き）
 elif menu == "一括表示":
     st.header("売上一覧・集計＆統計分析 (Pandas利用)")
 
@@ -189,16 +175,12 @@ elif menu == "一括表示":
         st.warning("まだ売上データがありません。")
     else:
         filtered_df = get_filtered_sales(df)
-        # 表示用に整形
         styled_df = filtered_df.copy()
         styled_df = styled_df.sort_values("日時", ascending=True)
-
-        # メイン画面にはフィルター表示せずフィルターはサイドバーに移動
 
         st.subheader("■ 売上履歴データ (最新順) ※絞り込み反映")
         st.dataframe(styled_df[::-1][["日時", "商品名", "売上金額", "利益"]], hide_index=True, use_container_width=True)
 
-        # --- フィルタ後の統計 ---
         st.markdown("### ▼ 統計情報まとめ (絞り込み条件反映)")
 
         total_sales = int(filtered_df["売上金額"].sum()) if not filtered_df.empty else 0
@@ -207,7 +189,7 @@ elif menu == "一括表示":
         total_profit = int(filtered_df["利益"].sum()) if not filtered_df.empty else 0
         avg_profit = float(filtered_df["利益"].mean()) if not filtered_df["利益"].empty else 0
         order_count = len(filtered_df) if not filtered_df.empty else 0
-        avg_unit_price = avg_sales  # 1明細＝1客なら平均客単価≒平均売上金額
+        avg_unit_price = avg_sales
 
         stats_cols = st.columns(3)
         stats_cols[0].metric("最高売上額", f"{max_sales:,} 円")
@@ -216,7 +198,6 @@ elif menu == "一括表示":
 
         st.write(f"**売上件数:** {order_count:,} 回　　**平均利益:** {avg_profit:,.1f} 円")
 
-        # 詳細商品別集計
         st.markdown("### ▼ 商品ごとの集計（売上・利益・利益率）(絞り込み反映)")
         group = (
             filtered_df.groupby("商品名")
@@ -237,9 +218,7 @@ elif menu == "一括表示":
         group = group.sort_values("売上合計", ascending=False)
         st.dataframe(group, use_container_width=True)
 
-        # グラフ生成(Pandas+Matplotlibでスマートに)
         import matplotlib.pyplot as plt
-        # ★★★ ここでjapanize_matplotlibにより日本語が化けずに描画される ★★★
 
         st.markdown("### ▼ 商品別売上集計グラフ (絞り込み反映)")
         if st.button("最新のグラフで集計を見る（PNGも更新）"):
@@ -257,7 +236,6 @@ elif menu == "一括表示":
                 except Exception as e:
                     st.error(f"グラフ作成の実行中にエラーが発生しました: {e}")
 
-        # グラフをStreamlitでも即時描画
         fig, ax = plt.subplots(figsize=(6, 4))
         if not group.empty and group["売上合計"].sum() > 0:
             group.plot(
@@ -278,13 +256,11 @@ elif menu == "一括表示":
         else:
             st.info("該当データがありませんのでグラフは表示できません。")
 
-        # PNG画像（外部保存）も表示
         if os.path.exists(CHART_FILE):
             st.image(CHART_FILE, caption="保存済みグラフ画像（sales_chart.png）")
         else:
             st.info("（PNG画像：sales_chart.png がまだありません。ボタンから生成してください）")
 
-# 3. AI相談
 elif menu == "AI相談":
     st.header("AIコンサルのアドバイス")
     product_info = load_master_data()
@@ -297,7 +273,6 @@ elif menu == "AI相談":
         st.dataframe(view_df[::-1], hide_index=True, use_container_width=True)
         st.markdown("※ 上記リストは、サイドバーで指定された絞り込みデータです。この内容のみをAIで分析します。")
 
-        # ---- AI相談ボタン ----
         if not product_info:
             st.warning("『商品設定』からまず商品を登録してください。")
         elif st.button("AIに売上を分析してもらう！"):
@@ -311,15 +286,13 @@ elif menu == "AI相談":
                         else:
                             from google import genai
 
-                            # 絞り込み済みfiltered_dfをテキスト化
                             uriage_content = view_df.to_csv(index=False, header=True, encoding="utf-8")
 
                             prompt = (
                                 "現在、ユーザーは特定の条件でデータを絞り込んでいます。このデータセットのみに基づいて分析してください。\n"
                                 "あなたは10年の経験を持つ敏腕経営コンサルタントです。\n"
                                 "以下の売上履歴は、スタッフまたは店長の希望する特定の条件でフィルターされた限定的な範囲の売上データです。\n"
-                                "この範囲だけに集中して、質問の分析や提案・戦略を作成してください。"
-                                "\n"
+                                "この範囲だけに集中して、質問の分析や提案・戦略を作成してください。\n"
                                 "また、このデータは「日時, 商品名, 売上金額, 利益」というカラム名で、CSV形式で渡されます。\n"
                                 "以下のグラフ（sales_chart.png）もある体裁ですが、数値や予測の根拠は必ず今渡したフィルタ済みデータのみから推論してください。\n"
                                 "\n"
@@ -353,7 +326,6 @@ elif menu == "AI相談":
                     except Exception as e:
                         st.error(f"エラーが発生しました: {e}")
 
-# 4. 商品設定
 elif menu == "商品設定":
     st.header("商品設定（商品名・金額・原価の登録）")
     master = load_master_data()
@@ -373,8 +345,7 @@ elif menu == "商品設定":
             st.success(f"商品「{new_name.strip()}」を登録（または更新）しました。")
             updated = True
 
-    # 商品一覧の表示
-    master = load_master_data()  # 最新情報取得
+    master = load_master_data()
     if master:
         st.markdown("### ▼ 登録済み商品")
         for pname, info in master.items():
@@ -382,39 +353,84 @@ elif menu == "商品設定":
     else:
         st.info("まだ商品が登録されていません。")
 
-# 5. AI秘書（PDF要約）
+# ---------- AI秘書（PDF要約・対話・理解度テスト） ----------
 elif menu == "AI秘書":
-    st.header("AI秘書（PDF要約）")
+    st.header("AI秘書（PDF対話・要約＆学習モード）")
     st.markdown(
-        "### PDF資料をアップロードすると、AI（Gemini）が内容をプロの秘書目線で分かりやすく要約します。\n"
-        "3点の要約：①結論 ②重要なポイント3つ ③次に取るべき行動"
+        "### PDF資料をアップロードしてください。AI秘書が要約し、内容について質問・会話・テストができます！<br>"
+        "3点要約：①結論 ②重要なポイント3つ ③次に取るべき行動<br>"
+        "・要約下のチャット欄で内容について質問できます<br>"
+        "・「理解度テスト作成」ボタンでAIが確認テストも出題します",
+        unsafe_allow_html=True
     )
 
-    # アップロード用
+    # --- 初期セッション確保 ---
+    if "pdf_text" not in st.session_state:
+        st.session_state["pdf_text"] = None
+    if "pdf_chat_history" not in st.session_state:
+        st.session_state["pdf_chat_history"] = []
+    if "pdf_last_filehash" not in st.session_state:
+        st.session_state["pdf_last_filehash"] = None
+    if "pdf_summary" not in st.session_state:
+        st.session_state["pdf_summary"] = None
+    if "pdf_quiz" not in st.session_state:
+        st.session_state["pdf_quiz"] = None
+
+    # --- 資料アップロード ---
     pdf_file = st.file_uploader("PDFファイルをアップロードしてください", type=["pdf"], key="pdf_upload")
 
-    read_pdf_text: Optional[str] = None
-    pdf_texts: Optional[list] = None
+    # --- PDFファイル内容抽出: テキスト化してst.session_state["pdf_text"]へ ---
+    def file_hash(f):
+        if f is None: return None
+        f.seek(0)
+        return hash(f.read())  # reset to beginning, should hash all content
+    file_changed = False
 
     if pdf_file is not None:
-        try:
-            import pdfplumber
-            with pdfplumber.open(pdf_file) as pdf:
-                pdf_texts = [page.extract_text() for page in pdf.pages]
-            # Noneまたは空でないリストのみ抽出
-            pdf_texts = [t for t in pdf_texts if t and t.strip()]
-            read_pdf_text = "\n".join(pdf_texts) if pdf_texts else ""
-        except Exception as e:
-            st.error(f"PDFの読み取り中にエラーが発生しました(pdfplumber): {e}")
-            read_pdf_text = None
+        # ファイルの内容が変わった場合、セッション内容(テキスト・履歴・要約・テスト)もリセット
+        cur_hash = file_hash(pdf_file)
+        if st.session_state["pdf_last_filehash"] != cur_hash:
+            st.session_state["pdf_last_filehash"] = cur_hash
+            st.session_state["pdf_text"] = None
+            st.session_state["pdf_summary"] = None
+            st.session_state["pdf_chat_history"] = []
+            st.session_state["pdf_quiz"] = None
+            file_changed = True
+        # 既にテキスト解析済みか確認
+        if st.session_state["pdf_text"] is None:
+            try:
+                import pdfplumber
+                pdf_file.seek(0)
+                with pdfplumber.open(pdf_file) as pdf:
+                    pdf_texts = [page.extract_text() for page in pdf.pages]
+                pdf_texts = [t for t in pdf_texts if t and t.strip()]
+                pdf_full_text = "\n".join(pdf_texts) if pdf_texts else ""
+            except Exception as e:
+                st.error(f"PDFの読み取り中にエラーが発生しました(pdfplumber): {e}")
+                pdf_full_text = ""
+            st.session_state["pdf_text"] = pdf_full_text
+        else:
+            pdf_full_text = st.session_state["pdf_text"]
 
-        # PDFテキストが読めたらAI要約
-        if read_pdf_text and read_pdf_text.strip():
-            st.markdown("#### --- 抽出内容（AI用） ---")
+        # --- テキストが取れたら要約/会話/テスト ---
+        if pdf_full_text and pdf_full_text.strip():
+
+            st.markdown("#### --- 抽出内容（AIハイライト用） ---")
             with st.expander("PDF全文の内容を一時確認したい場合はこちら", expanded=False):
-                st.text_area("PDFの全文（AIに渡す内容）", read_pdf_text, height=200)
+                st.text_area("PDFの全文（AIに渡す内容）", pdf_full_text, height=200)
 
-            if st.button("AI秘書に要約してもらう！"):
+            # --------- AIで要約（session_stateにキャッシュ） ---------
+            make_summary = False
+            if st.session_state["pdf_summary"] is None:
+                if st.button("AI秘書に資料要約してもらう！"):
+                    make_summary = True
+            else:
+                # 表示再現
+                st.markdown("#### --- AI秘書による要約 ---")
+                st.markdown(st.session_state["pdf_summary"])
+
+            # 実行
+            if make_summary:
                 with st.spinner("AIがPDF資料の内容を要約中...(Gemini)"):
                     try:
                         if not GOOGLE_API_KEY or GOOGLE_API_KEY.strip() == "":
@@ -430,7 +446,7 @@ elif menu == "AI秘書":
                                 "③次に取るべき行動\n"
                                 "\n"
                                 "【PDF資料内容】\n"
-                                f"{read_pdf_text}\n"
+                                f"{pdf_full_text}\n"
                             )
 
                             client = genai.Client(api_key=GOOGLE_API_KEY.strip())
@@ -438,18 +454,123 @@ elif menu == "AI秘書":
                                 model="gemini-2.5-flash",
                                 contents=prompt
                             )
+                            summary = response.text
+                            st.session_state["pdf_summary"] = summary
                             st.markdown("#### --- AI秘書による要約 ---")
-                            # 回答をMarkdownで読みやすく表示
-                            st.markdown(response.text)
+                            st.markdown(summary)
                     except Exception as e:
                         st.error(f"AI要約中にエラーが発生しました: {e}")
+
+            # ----------------- チャット機能エリア -----------------
+            st.markdown("---")
+            st.markdown("#### 💬 この資料の内容をAI秘書へ質問 (対話学習モード)")
+            placeholder = st.empty()
+
+            # チャット履歴描画
+            chat_history = st.session_state["pdf_chat_history"]
+            for m in chat_history:
+                if m["role"] == "user":
+                    with st.chat_message("user"):
+                        st.write(m["content"])
+                elif m["role"] == "assistant":
+                    with st.chat_message("assistant"):
+                        st.write(m["content"])
+
+            # チャット入力
+            user_msg = st.chat_input("この資料について質問してください", key="pdf_chat_input")
+            if user_msg and user_msg.strip():
+                # 履歴に追加
+                chat_history.append({"role": "user", "content": user_msg.strip()})
+                # Geminiへ問い合わせ
+                with st.spinner("AI秘書が資料を読み取って調べています..."):
+                    try:
+                        from google import genai
+
+                        # 直近長めに履歴をまとめて文脈として投げる
+                        hist_to_send = [
+                            {"role": h["role"], "parts": [{"text": h["content"]}]}
+                            for h in chat_history[-6:]  # 直近だけに制限
+                        ]
+                        # 資料内容も必ず含める
+                        system_message = (
+                            "あなたは資料に詳しい日本人秘書です。\n"
+                            "必ず、下記PDF資料の内容に基づいた事実のみ正確に答えてください。\n"
+                            "質問に自信がない場合や資料に明記がない場合は「申し訳ありませんが、その内容は資料には記載されていません」とだけ返してください。\n"
+                            "\n"
+                            "【PDF資料内容】\n"
+                            f"{pdf_full_text}"
+                        )
+
+                        client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=[
+                                {"role": "system", "parts": [{"text": system_message}]},
+                                *hist_to_send,
+                                {"role": "user", "parts": [{"text": user_msg}]}
+                            ]
+                        )
+                        output = response.text
+                        chat_history.append({"role": "assistant", "content": output})
+                        # 描画を更新
+                        placeholder.empty()
+                        for m in chat_history:
+                            if m["role"] == "user":
+                                with st.chat_message("user"):
+                                    st.write(m["content"])
+                            elif m["role"] == "assistant":
+                                with st.chat_message("assistant"):
+                                    st.write(m["content"])
+                    except Exception as e:
+                        st.error(f"AI秘書とのチャット中にエラーが発生しました: {e}")
+
+            # --------- 理解度テスト自動出題・解答エリア ---------
+            st.markdown("---")
+            make_quiz = st.button("この資料から3問、理解度テストを作成する", key="make_quiz_btn_main")
+            quiz_to_show = None
+
+            # サイドバー経由で出題ボタン押された場合 or 画面リロードでも維持
+            if st.session_state.get("pdf_quiz") is not None:
+                quiz_to_show = st.session_state["pdf_quiz"]
+
+            # サイドバーもしくはメイン画面のボタンで
+            if make_quiz or test_btn:
+                with st.spinner("AI秘書が資料内容から3問テストを作っています..."):
+                    try:
+                        from google import genai
+
+                        prompt = (
+                            "以下のPDF資料の全文に基づいて、読者の理解度を確認できる3問のクイズ（問い）を日本語で作成してください。\n"
+                            "各問について「問題」「正答」「詳しい解説」を必ずセットでマークダウン形式で示してください。\n"
+                            "例:\n"
+                            "【第1問】・・・\n"
+                            "**答え:**\n"
+                            "**解説:**\n"
+                            "\n"
+                            "資料の範囲からのみ出し、難易度は初級〜中級程度としてください。\n"
+                            "【PDF資料内容】\n"
+                            f"{pdf_full_text}\n"
+                        )
+
+                        client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=prompt
+                        )
+                        quiz_text = response.text
+                        st.session_state["pdf_quiz"] = quiz_text
+                        quiz_to_show = quiz_text
+                    except Exception as e:
+                        st.error(f"AIによる理解度テスト出題中にエラーが発生しました: {e}")
+
+            if quiz_to_show:
+                st.markdown("#### --- AI秘書による理解度テスト ---")
+                st.markdown(quiz_to_show)
+
         else:
-            # テキストが全く取れなかった場合（画像型PDFなど）
             st.info("※ PDF内にテキストが含まれていないか抽出できませんでした。")
             st.info("画像として解析を試みます（β）")
 
-            # ここで「Geminiにファイルを直接渡す」方法が高度だが、
-            # ユーザーに柔らかく案内してフォールバックも兼ねる
             if st.button("画像PDFをGeminiにそのまま解析依頼（実験的機能）"):
                 with st.spinner("Geminiが画像形式PDFの解析を試みています..."):
                     try:
@@ -457,20 +578,14 @@ elif menu == "AI秘書":
                             st.error("Google APIキーが設定されていません。")
                         else:
                             from google import genai
-
                             prompt = (
                                 "あなたは画像PDFやスキャン資料から重要な内容を要約することができるプロの日本人秘書です。\n"
                                 "アップロードされたPDFファイルは画像形式または通常のPDFです。\n"
                                 "内容を読み取り、わかりやすく①結論②重要なポイント3つ③次に取るべき行動でまとめてください。\n"
                             )
-
-                            # StreamlitUploaderはファイル型だがGoogle Gemini APIに合わせて渡す
                             pdf_file.seek(0)
                             pdf_bytes = pdf_file.read()
                             client = genai.Client(api_key=GOOGLE_API_KEY.strip())
-                            # Google Gemini APIで「files=...」のような高度APIを使える場合
-                            # https://ai.google.dev/api/rest/v1beta/models/gemini-pro-vision/...
-                            # ただし、google-generativeai通常パッケージで可能かは環境差異あり
                             try:
                                 response = client.models.generate_content(
                                     model="gemini-2.5-flash",
@@ -483,7 +598,6 @@ elif menu == "AI秘書":
                                 st.markdown("#### --- AI秘書による（画像PDFも考慮した）要約 ---")
                                 st.markdown(response.text)
                             except Exception as e2:
-                                # filesオプション非対応などエラー時
                                 st.warning("Geminiへの画像直接渡しにはAPI対応が必要です。")
                                 st.error(f"ファイル送信時エラー: {e2}")
 
