@@ -638,11 +638,12 @@ elif menu == "AI秘書":
                 with dl_cols[1]:
                     def generate_pdf_report(full_report, section_texts):
                         """
-                        PDFの上下左右に10mm余白、日本語フォントIPAexGothicをセット、11pt標準。
-                        1行もはみ出さないようmulti_cell(w=pdf.epw, h=10,...)で自動折返し。
+                        PDFの上下左右に15mm余白、日本語フォントIPAexGothicをセット、11pt標準。
+                        pdf.set_x(15)で左端リセット、multi_cell(w=0, h=10, ...)で右余白まで自動折り返し。
                         set_auto_page_breakで自動改頁。
-                        タイトルは中央大きめ、中身は左詰。
-                        ※style='B'等は絶対に使わず、全て通常スタイル。見出し/タイトルはフォントサイズ差で対応。
+                        タイトルは中央大きめ、中身・セクションは左詰。
+                        style='B'等は使わず、すべて通常スタイル。見出し/タイトルはフォントサイズ差で強調。
+                        セクション書き出し前に必ずset_x(15)。
                         """
                         try:
                             pdf_bytes = None
@@ -654,8 +655,8 @@ elif menu == "AI秘書":
                             font_set_success = False
                             font_name = "IPAexGothic"
                             pdf = FPDF(orientation='P', unit='mm', format='A4')
-                            # 余白は全て10mm
-                            l_margin = r_margin = t_margin = b_margin = 10
+                            # 余白は全て15mm
+                            l_margin = r_margin = t_margin = b_margin = 15
                             pdf.set_auto_page_break(auto=True, margin=b_margin)
                             pdf.set_left_margin(l_margin)
                             pdf.set_right_margin(r_margin)
@@ -664,7 +665,6 @@ elif menu == "AI秘書":
                             pdf.add_page()
                             try:
                                 if font_path and os.path.exists(font_path):
-                                    # 追加はstyle=''だけ設定
                                     pdf.add_font(font_name, '', font_path, uni=True)
                                     font_set_success = True
                                 else:
@@ -672,52 +672,46 @@ elif menu == "AI秘書":
                             except Exception as e_font:
                                 font_set_success = False
                                 st.warning("PDF用フォント(ipaexg.ttf)設定に失敗: {}".format(e_font))
-                            # 有効横幅
-                            page_width = pdf.w - l_margin - r_margin
+
                             # タイトル (中央/大きめ)
                             if section_texts:
                                 title = "AI秘書レポート"
                                 pdf.set_y(t_margin)
-                                # タイトルはフォントサイズ20で強調
                                 if font_set_success:
                                     pdf.set_font(font_name, size=20)
                                 else:
                                     pdf.set_font("Arial", size=20)
-                                # 有効横幅いっぱいを書き込む（w=pdf.epw）
-                                try:
-                                    epw = pdf.epw
-                                except Exception:
-                                    epw = page_width
                                 th = pdf.font_size_pt * 1.8
                                 pdf.set_x(l_margin)
-                                pdf.multi_cell(w=epw, h=th, txt=title, align='C')
+                                # タイトルは中央揃え
+                                pdf.multi_cell(w=0, h=th, txt=title, align='C')
                                 pdf.ln(6)
+
                             # 本文
                             content_font_size = 11
                             section_title_font_size = 15  # セクション見出しは普通より大きめで強調
-                            try:
-                                epw = pdf.epw
-                            except Exception:
-                                epw = page_width
                             for i, section in enumerate(section_texts):
                                 section_lines = section.splitlines()
                                 if section_lines:
                                     firstline = section_lines[0]
-                                    # セクション見出しのみ大きく（太字不使用）
+                                    # セクション見出し：大きめフォント、左詰
                                     if font_set_success:
                                         pdf.set_font(font_name, size=section_title_font_size)
                                     else:
                                         pdf.set_font("Arial", size=section_title_font_size)
-                                    pdf.multi_cell(w=epw, h=10, txt=firstline, align='L')
-                                    # 続き: 通常サイズ
+                                    pdf.set_x(l_margin)
+                                    pdf.multi_cell(w=0, h=10, txt=firstline, align='L')
+                                    # 続き: 通常サイズで左詰・自動折り返し
                                     if font_set_success:
                                         pdf.set_font(font_name, size=content_font_size)
                                     else:
                                         pdf.set_font("Arial", size=content_font_size)
                                     for line in section_lines[1:]:
-                                        pdf.multi_cell(w=epw, h=10, txt=line, align='L')
+                                        pdf.set_x(l_margin)
+                                        pdf.multi_cell(w=0, h=10, txt=line, align='L')
                                     pdf.ln(4)
                                 else:
+                                    pdf.set_x(l_margin)
                                     pdf.ln(4)
                             try:
                                 out = pdf.output(dest='S')
