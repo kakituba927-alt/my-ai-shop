@@ -11,6 +11,11 @@ import japanize_matplotlib  # ★ 日本語グラフ化け防止のため必ずi
 import io
 from typing import Optional
 
+# === PDF出力・フォントDL用 ===
+import requests
+import tempfile
+from fpdf import FPDF
+
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 
@@ -598,7 +603,8 @@ elif menu == "AI秘書":
                 st.markdown("#### --- AI秘書による理解度テスト ---")
                 st.markdown(quiz_to_show)
 
-            # ===== ▼▼▼ ダウンロードボタン追加 ▼▼▼ ===========
+            # ===== ▼▼▼ ダウンロードボタン追加（TXT＋PDF両方） ▼▼▼ ===========
+
             # 1. 要約、テスト問題、チャット履歴を1つのテキストにまとめる
             section_texts = []
             # PDF要約
@@ -620,14 +626,67 @@ elif menu == "AI秘書":
                 section_texts.append("\n".join(chat_lines))
             # ひとまとめ
             full_report = "\n\n".join(section_texts)
+
+            # [1] TXTダウンロードボタン・[2] PDFダウンロードボタンを横並びまたは近くで表示
             if full_report.strip():
-                st.download_button(
-                    label="レポートをテキストで保存",
-                    data=full_report,
-                    file_name="AI秘書レポート.txt",
-                    mime="text/plain"
-                )
-            # ===== ▲▲▲ ダウンロードボタン追加ここまで ▲▲▲ ==========
+                dl_cols = st.columns(2)
+                with dl_cols[0]:
+                    st.download_button(
+                        label="レポートをテキストで保存",
+                        data=full_report,
+                        file_name="AI秘書レポート.txt",
+                        mime="text/plain"
+                    )
+                with dl_cols[1]:
+                    # PDF作成用関数
+                    def generate_pdf_report(full_report, font_url="https://github.com/googlefonts/ipaexfont/raw/main/fonts/ipaexg.ttf"):
+                        # 1. IPAexGothic（ipaexg.ttf）DL
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as tf:
+                            font_path = tf.name
+                            # 既にDL済みの場合スキップしたいが、単純DL
+                            r = requests.get(font_url)
+                            tf.write(r.content)
+                        pdf = FPDF(orientation='P', unit='mm', format='A4')
+                        pdf.add_page()
+                        # 日本語フォント登録
+                        try:
+                            pdf.add_font('IPAexGothic', '', font_path, uni=True)
+                            font_name = 'IPAexGothic'
+                        except Exception as e:
+                            # フォールバック
+                            font_name = ''
+                        if font_name:
+                            pdf.set_font(font_name, size=13)
+                        else:
+                            pdf.set_font("Arial", size=12)
+
+                        # セクション毎に改行を適切に
+                        for section in section_texts:
+                            for line in section.splitlines():
+                                # 改ページ制御
+                                if pdf.get_y() > 260:
+                                    pdf.add_page()
+                                    pdf.set_font(font_name, size=13) if font_name else pdf.set_font("Arial", size=12)
+                                pdf.multi_cell(0, 8, line)
+                            pdf.ln(4)
+                        # PDF内容をバイトで返す
+                        pdf_output = pdf.output(dest='S').encode('latin1')
+                        # クリーンナップ
+                        try:
+                            os.remove(font_path)
+                        except Exception:
+                            pass
+                        return pdf_output
+
+                    # PDF内容生成しボタン化
+                    pdf_bytes = generate_pdf_report(full_report)
+                    st.download_button(
+                        label="レポートをPDFで保存",
+                        data=pdf_bytes,
+                        file_name="AI秘書レポート.pdf",
+                        mime="application/pdf"
+                    )
+            # ===== ▲▲▲ ダウンロードボタン追加ここまで（TXT+PDF） ▲▲▲ ==========
 
         else:
             st.info("※ PDF内にテキストが含まれていないか抽出できませんでした。")
@@ -678,6 +737,8 @@ elif menu == "AI秘書":
 # pandas
 # numpy
 # pdfplumber
+# fpdf2
+# requests
 # -----------------------------------
 
 # --- graph.py 側のフォント設定例（matplotlib使用時。MS Gothicなど安全なフォント指定を追記してください）---
