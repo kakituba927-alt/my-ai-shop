@@ -468,11 +468,28 @@ elif menu == "AI秘書":
 
             # チャット履歴描画
             chat_history = st.session_state["pdf_chat_history"]
+
+            # ---- ここで履歴のロール名を「user」「model」のみで統一する処理。 ----
+            # 既存履歴中で 'assistant'→'model', 'system'→'model' など全変換
+            valid_roles = {"user", "model"}
+            for msg in chat_history:
+                # 役割の変換
+                if msg.get("role") not in valid_roles:
+                    if msg.get("role") == "assistant":
+                        msg["role"] = "model"
+                    elif msg.get("role") == "system":
+                        msg["role"] = "model"
+                    else:
+                        # 万が一他のロール名も"model"で統一
+                        msg["role"] = "model"
+
+            # チャット履歴描画
             for m in chat_history:
+                # Streamlit描画側のみ識別語「user」(人間)・「model」(AI)で分岐
                 if m["role"] == "user":
                     with st.chat_message("user"):
                         st.write(m["content"])
-                elif m["role"] == "assistant":
+                elif m["role"] == "model":
                     with st.chat_message("assistant"):
                         st.write(m["content"])
 
@@ -502,23 +519,37 @@ elif menu == "AI秘書":
                         )
 
                         client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+                        # GeminiのAPIでは "system" ロールは使えません
+                        # そのため、ヒストリ直列(直近N件/user,modelのみ) + system_messageは最新userメッセージに含める
+                        # もしくは、最初の質問のプレフィックスとして渡す
+                        # ここでは直近6件+最新user発話の内容にsystem_messageをヘッダ的に付加
+                        hist_for_api = []
+                        for h in chat_history[-5:]:  # 直近5件
+                            hist_for_api.append({"role": h["role"], "parts": [{"text": h["content"]}]})
+
+                        # latest user msg: system_message + ユーザー入力 を結合
+                        hist_for_api.append({
+                            "role": "user",
+                            "parts": [{"text": system_message + "\n\n【質問】\n" + user_msg.strip()}]
+                        })
+
                         response = client.models.generate_content(
                             model="gemini-2.5-flash",
-                            contents=[
-                                {"role": "system", "parts": [{"text": system_message}]},
-                                *hist_to_send,
-                                {"role": "user", "parts": [{"text": user_msg}]}
-                            ]
+                            contents=hist_for_api
                         )
                         output = response.text
-                        chat_history.append({"role": "assistant", "content": output})
+                        chat_history.append({"role": "model", "content": output})
                         # 描画を更新
                         placeholder.empty()
+                        # 再度履歴ロール整備＆表示
+                        for msg in chat_history:
+                            if msg.get("role") not in valid_roles:
+                                msg["role"] = "model"
                         for m in chat_history:
                             if m["role"] == "user":
                                 with st.chat_message("user"):
                                     st.write(m["content"])
-                            elif m["role"] == "assistant":
+                            elif m["role"] == "model":
                                 with st.chat_message("assistant"):
                                     st.write(m["content"])
                     except Exception as e:
