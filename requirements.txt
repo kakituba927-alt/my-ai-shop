@@ -5,3 +5,4 @@ japanize-matplotlib
 setuptools
 pandas
 pdfplumber
+fpdf2
