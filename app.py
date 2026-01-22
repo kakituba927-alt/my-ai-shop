@@ -598,6 +598,37 @@ elif menu == "AI秘書":
                 st.markdown("#### --- AI秘書による理解度テスト ---")
                 st.markdown(quiz_to_show)
 
+            # ===== ▼▼▼ ダウンロードボタン追加 ▼▼▼ ===========
+            # 1. 要約、テスト問題、チャット履歴を1つのテキストにまとめる
+            section_texts = []
+            # PDF要約
+            if st.session_state.get("pdf_summary"):
+                section_texts.append("【AI秘書要約】\n" + st.session_state["pdf_summary"])
+            # 理解度テスト
+            if st.session_state.get("pdf_quiz"):
+                section_texts.append("【AI理解度テスト】\n" + st.session_state["pdf_quiz"])
+            # チャット履歴
+            chat = st.session_state.get("pdf_chat_history", [])
+            if chat:
+                chat_lines = []
+                chat_lines.append("【AI秘書とのQ&Aチャット履歴】")
+                for i, msg in enumerate(chat):
+                    if msg.get("role") == "user":
+                        chat_lines.append(f"\nQ{i//2+1}: {msg.get('content')}")
+                    elif msg.get("role") == "model":
+                        chat_lines.append(f"AI: {msg.get('content')}")
+                section_texts.append("\n".join(chat_lines))
+            # ひとまとめ
+            full_report = "\n\n".join(section_texts)
+            if full_report.strip():
+                st.download_button(
+                    label="レポートをテキストで保存",
+                    data=full_report,
+                    file_name="AI秘書レポート.txt",
+                    mime="text/plain"
+                )
+            # ===== ▲▲▲ ダウンロードボタン追加ここまで ▲▲▲ ==========
+
         else:
             st.info("※ PDF内にテキストが含まれていないか抽出できませんでした。")
             st.info("画像として解析を試みます（β）")
