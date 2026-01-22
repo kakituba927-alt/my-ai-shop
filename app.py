@@ -11,9 +11,7 @@ import japanize_matplotlib  # ★ 日本語グラフ化け防止のため必ずi
 import io
 from typing import Optional
 
-# === PDF出力・フォントDL用 ===
-import requests
-import tempfile
+# === PDF出力で日本語フォントを確実に使う ===
 from fpdf import FPDF
 
 # --- 1. セキュアな方法でAPIキーをセット（Streamlit Cloud用） ---
@@ -639,78 +637,61 @@ elif menu == "AI秘書":
                     )
                 with dl_cols[1]:
                     # PDF作成用関数
-                    def generate_pdf_report(full_report, font_url="https://github.com/ipaex/ipaexfont/raw/master/ipaexg.ttf"):
+                    def generate_pdf_report(full_report):
                         """
-                        PDF出力でUnicode日本語フォントが確実に使えるように、IPAexGothicを都度DL。  
-                        FPDFUnicodeEncodingExceptionにも対応した堅牢なPDFエクスポート関数。
-                        失敗時もアプリ停止しないよう例外ハンドリングを強く。
+                        PDF出力でUnicode日本語フォントが確実に使えるよう、カレントディレクトリのIPAexGothicフォントを使う。
+                        ネットDLや一時ファイルは使用せず、ipaexg.ttfまたはipaexgをカレントフォルダから探す。
+                        fail-safeでPDF生成の堅牢な関数。
                         """
-                        font_path = None
                         pdf_bytes = None
+                        font_path = None
+                        # 1. フォントファイル探索（同一フォルダ内）
+                        for fname in ["ipaexg.ttf", "ipaexg"]:
+                            if os.path.exists(fname):
+                                font_path = fname
+                                break
+                        font_set_success = False
+                        font_name = "IPAexGothic"
+                        pdf = FPDF(orientation='P', unit='mm', format='A4')
+                        pdf.add_page()
                         try:
-                            # フォントDL部分
-                            downloaded = False
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as tf:
-                                font_path = tf.name
-                                try:
-                                    r = requests.get(font_url, timeout=12)
-                                    r.raise_for_status()
-                                    tf.write(r.content)
-                                    downloaded = True
-                                except Exception as e_fontdl:
-                                    downloaded = False
-                            pdf = FPDF(orientation='P', unit='mm', format='A4')
-                            pdf.add_page()
-                            font_name = ''
+                            if font_path:
+                                pdf.add_font(font_name, '', font_path, uni=True)
+                                pdf.set_font(font_name, size=13)
+                                font_set_success = True
+                            else:
+                                st.error("PDF日本語フォント(ipaexg.ttf)が存在しません。このファイルを同じフォルダに置いてください。")
+                                pdf.set_font("Arial", size=12)
+                        except Exception as e_font:
                             font_set_success = False
-                            # fpdf2 フォント追加
+                            st.error("PDF用フォント(ipaexg.ttf)設定に失敗: {}".format(e_font))
                             try:
-                                if downloaded and font_path and os.path.exists(font_path):
-                                    pdf.add_font('IPAexGothic', '', font_path, uni=True)
-                                    font_name = 'IPAexGothic'
-                                    pdf.set_font(font_name, size=13)
-                                    font_set_success = True
-                            except Exception as e_addfont:
-                                font_set_success = False
-                            if not font_set_success:
+                                pdf.set_font("Arial", size=12)
+                            except Exception:
+                                pass
+                        # セクション毎に改行を適切に
+                        for section in section_texts:
+                            for line in section.splitlines():
+                                if pdf.get_y() > 260:
+                                    pdf.add_page()
+                                    if font_set_success:
+                                        pdf.set_font(font_name, size=13)
+                                    else:
+                                        try:
+                                            pdf.set_font("Arial", size=12)
+                                        except Exception:
+                                            pass
                                 try:
-                                    pdf.set_font("Arial", size=12)
-                                except Exception:
-                                    pass  # 念のため
-                            # セクション毎に改行を適切に
-                            for section in section_texts:
-                                for line in section.splitlines():
-                                    if pdf.get_y() > 260:
-                                        pdf.add_page()
-                                        if font_set_success:
-                                            pdf.set_font(font_name, size=13)
-                                        else:
-                                            try:
-                                                pdf.set_font("Arial", size=12)
-                                            except Exception:
-                                                pass
-                                    try:
-                                        # fpdf2はutf-8(uni=True)なら日本語も multi_cell でOK
-                                        pdf.multi_cell(0, 8, line)
-                                    except Exception as ee:
-                                        pdf.multi_cell(0, 8, "（表示失敗）")
-                                pdf.ln(4)
-                            try:
-                                # fpdf2でS渡し→bytes
-                                pdf_bytes = pdf.output(dest='S').encode('latin1')
-                            except Exception as e_bytes:
-                                pdf_bytes = None
-                                st.error("PDF保存時にエラーが発生しました（日本語が含まれる場合は文字化け・保存失敗の可能性があります）: {}".format(e_bytes))
-                        except Exception as e:
+                                    # fpdf2はutf-8(uni=True)なら日本語も multi_cell でOK
+                                    pdf.multi_cell(0, 8, line)
+                                except Exception as ee:
+                                    pdf.multi_cell(0, 8, "（表示失敗）")
+                            pdf.ln(4)
+                        try:
+                            pdf_bytes = pdf.output(dest='S').encode('latin1')
+                        except Exception as e_bytes:
                             pdf_bytes = None
-                            st.error("PDF作成に失敗しました: {}".format(e))
-                        finally:
-                            # クリーンナップ
-                            if font_path and os.path.exists(font_path):
-                                try:
-                                    os.remove(font_path)
-                                except Exception:
-                                    pass
+                            st.error("PDF保存時にエラーが発生しました（日本語が含まれる場合は文字化け・保存失敗の可能性があります）: {}".format(e_bytes))
                         return pdf_bytes
 
                     pdf_bytes = None
@@ -726,7 +707,7 @@ elif menu == "AI秘書":
                             mime="application/pdf"
                         )
                     else:
-                        st.warning("PDF出力に失敗しました。英語名やテキスト保存は可能です。")
+                        st.warning("PDF出力に失敗しました。ipaexg.ttfファイルを同じディレクトリに入れて下さい。TXT保存は可能です。")
 
             # ===== ▲▲▲ ダウンロードボタン追加ここまで（TXT+PDF） ▲▲▲ ==========
 
