@@ -639,7 +639,7 @@ elif menu == "AI秘書":
                     )
                 with dl_cols[1]:
                     # PDF作成用関数
-                    def generate_pdf_report(full_report, font_url="https://github.com/googlefonts/ipaexfont/raw/main/fonts/ipaexg.ttf"):
+                    def generate_pdf_report(full_report, font_url="https://github.com/ipaex/ipaexfont/raw/master/ipaexg.ttf"):
                         """
                         PDF出力でUnicode日本語フォントが確実に使えるように、IPAexGothicを都度DL。  
                         FPDFUnicodeEncodingExceptionにも対応した堅牢なPDFエクスポート関数。
@@ -648,38 +648,55 @@ elif menu == "AI秘書":
                         font_path = None
                         pdf_bytes = None
                         try:
+                            # フォントDL部分
+                            downloaded = False
                             with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as tf:
                                 font_path = tf.name
-                                # フォントをインターネットから確実にダウンロード
-                                r = requests.get(font_url)
-                                r.raise_for_status()
-                                tf.write(r.content)
+                                try:
+                                    r = requests.get(font_url, timeout=12)
+                                    r.raise_for_status()
+                                    tf.write(r.content)
+                                    downloaded = True
+                                except Exception as e_fontdl:
+                                    downloaded = False
                             pdf = FPDF(orientation='P', unit='mm', format='A4')
                             pdf.add_page()
-                            # 日本語フォントをUnicodeモードで追加
+                            font_name = ''
+                            font_set_success = False
+                            # fpdf2 フォント追加
                             try:
-                                pdf.add_font('IPAexGothic', '', font_path, uni=True)
-                                font_name = 'IPAexGothic'
-                                pdf.set_font(font_name, size=13)
-                            except Exception as e_font:
-                                font_name = ''
-                                pdf.set_font("Arial", size=12)
+                                if downloaded and font_path and os.path.exists(font_path):
+                                    pdf.add_font('IPAexGothic', '', font_path, uni=True)
+                                    font_name = 'IPAexGothic'
+                                    pdf.set_font(font_name, size=13)
+                                    font_set_success = True
+                            except Exception as e_addfont:
+                                font_set_success = False
+                            if not font_set_success:
+                                try:
+                                    pdf.set_font("Arial", size=12)
+                                except Exception:
+                                    pass  # 念のため
                             # セクション毎に改行を適切に
                             for section in section_texts:
                                 for line in section.splitlines():
                                     if pdf.get_y() > 260:
                                         pdf.add_page()
-                                        if font_name:
+                                        if font_set_success:
                                             pdf.set_font(font_name, size=13)
                                         else:
-                                            pdf.set_font("Arial", size=12)
+                                            try:
+                                                pdf.set_font("Arial", size=12)
+                                            except Exception:
+                                                pass
                                     try:
+                                        # fpdf2はutf-8(uni=True)なら日本語も multi_cell でOK
                                         pdf.multi_cell(0, 8, line)
                                     except Exception as ee:
-                                        # 万一日本語で失敗時は無視し空行で置換
                                         pdf.multi_cell(0, 8, "（表示失敗）")
                                 pdf.ln(4)
                             try:
+                                # fpdf2でS渡し→bytes
                                 pdf_bytes = pdf.output(dest='S').encode('latin1')
                             except Exception as e_bytes:
                                 pdf_bytes = None
@@ -696,7 +713,6 @@ elif menu == "AI秘書":
                                     pass
                         return pdf_bytes
 
-                    # PDF作成を安全に呼ぶ・例外でアプリ落ちを防ぐ
                     pdf_bytes = None
                     try:
                         pdf_bytes = generate_pdf_report(full_report)
